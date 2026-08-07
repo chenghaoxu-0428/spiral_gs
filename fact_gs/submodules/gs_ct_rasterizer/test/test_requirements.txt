@@ -1,0 +1,4 @@
+numpy
+matplotlib
+scikit-image
+git+https://github.com/Ruyi-Zha/r2_gaussian.git#egg=xray-gaussian-rasterization-voxelization&subdirectory=r2_gaussian/submodules/xray-gaussian-rasterization-voxelization --no-build-isolation

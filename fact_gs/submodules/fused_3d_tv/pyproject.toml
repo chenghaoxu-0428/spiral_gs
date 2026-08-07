@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel", "torch"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fused-3d-tv"
+version = "0.1.0"
+description = "Minimal fully-fused 3D total variation CUDA extension"
+readme = "README.md"
+requires-python = ">=3.8"
+authors = [{name = "Codex"}]
+
+[project.urls]
+Homepage = "https://github.com/rahul-goel/fused-ssim"
+
+[tool.setuptools]
+packages = ["fused_3d_tv"]
