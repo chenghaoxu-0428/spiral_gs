@@ -92,7 +92,16 @@ def initialize_gaussian_from_prior(gaussians: GaussianModel, model_args):
     print(f"Loaded {gaussians.get_xyz.shape[0]} Gaussians.")
     
 
-def sample_vol(vol, density_thresh, n_points, scanner_cfg, init_mode, density_rescale):
+def sample_vol(
+    vol,
+    density_thresh,
+    n_points,
+    scanner_cfg,
+    init_mode,
+    density_rescale,
+    density_init_scale=1.0,
+    seed=0,
+):
     """Sample points from a volume for initialization."""
     
     density_mask = vol > density_thresh
@@ -104,11 +113,13 @@ def sample_vol(vol, density_thresh, n_points, scanner_cfg, init_mode, density_re
     dVoxel = np.array(scanner_cfg["dVoxel"])
     sVoxel = np.array(scanner_cfg["sVoxel"])
 
+    rng = np.random.RandomState(seed)
+
     if init_mode == 'intensity':
-        print("Random sampling in an intensity volume.")
+        print("Uniformly sampling foreground voxels (R2-Gaussian initialization).")
 
         sampled_indices = valid_indices[
-            np.random.choice(len(valid_indices), n_points, replace=False)
+            rng.choice(len(valid_indices), n_points, replace=False)
         ]
 
     elif init_mode == 'gradient':
@@ -124,8 +135,13 @@ def sample_vol(vol, density_thresh, n_points, scanner_cfg, init_mode, density_re
         g_norm = g_norm / g_norm.sum()
 
         sampled_indices = valid_indices[
-            np.random.choice(len(valid_indices), n_points, replace=False, p=g_norm)
+            rng.choice(len(valid_indices), n_points, replace=False, p=g_norm)
         ]
+
+    else:
+        raise ValueError(
+            f"Unknown volume sampling mode '{init_mode}'. Expected 'intensity' or 'gradient'."
+        )
 
     sampled_positions = sampled_indices * dVoxel - sVoxel / 2 + offOrigin
     sampled_densities = vol[
@@ -134,11 +150,20 @@ def sample_vol(vol, density_thresh, n_points, scanner_cfg, init_mode, density_re
         sampled_indices[:, 2],
     ]
 
-    sampled_densities = sampled_densities * density_rescale *0.25 #TODO: why is it here?
+    # R2-Gaussian uses density_rescale directly.  FaCT-GS historically applied
+    # an additional hard-coded 0.25 here, which makes an otherwise identical
+    # initialization four times dimmer and breaks R2 quality parity.
+    sampled_densities = sampled_densities * density_rescale * density_init_scale
 
     return sampled_positions, sampled_densities
 
-def initialize_gaussian_from_proj(gaussians: GaussianModel, model_args, optim_args, scene: SceneRecon):
+def initialize_gaussian_from_proj(
+    gaussians: GaussianModel,
+    model_args,
+    optim_args,
+    scene: SceneRecon,
+    init_mode=None,
+):
     # Calculate initial gaussian count
     n_points = int(model_args.num_gaussians)
     print(f"Initialize {n_points} out of total {model_args.num_gaussians} Gaussians.")
@@ -161,14 +186,39 @@ def initialize_gaussian_from_proj(gaussians: GaussianModel, model_args, optim_ar
     vol = recon_volume(projs_train, angles_train, copy.deepcopy(geo), recon_method="fdk")
     print("Reconstruction finished")
 
+    resolved_init_mode = init_mode or model_args.init_mode
     sampled_positions, sampled_densities = sample_vol(vol, 
                                                     model_args.density_thresh, 
                                                     n_points, 
                                                     scanner_cfg, 
-                                                    model_args.init_mode,
-                                                    model_args.density_rescale)
+                                                    resolved_init_mode,
+                                                    model_args.density_rescale,
+                                                    getattr(model_args, "density_init_scale", 1.0),
+                                                    getattr(model_args, "init_seed", 0))
 
-    gaussians.create_from_pcd(sampled_positions, sampled_densities[:,None], 1.0)
+    # Only the R2-equivalent uniform initializer owns the canonical
+    # init_<dataset>.npy name.  An explicitly requested gradient experiment
+    # must not overwrite the cold-start baseline used by later auto runs.
+    if (
+        resolved_init_mode == "intensity"
+        and getattr(model_args, "save_generated_init", True)
+    ):
+        dataset_name = osp.basename(osp.normpath(model_args.data_source_path))
+        init_path = osp.join(
+            model_args.data_source_path, f"init_{dataset_name}.npy"
+        )
+        if not osp.exists(init_path):
+            point_cloud = np.concatenate(
+                [sampled_positions, sampled_densities[:, None]], axis=1
+            )
+            np.save(init_path, point_cloud)
+            print(f"Saved reproducible initialization to {init_path}.")
+
+    gaussians.create_from_pcd(
+        sampled_positions,
+        sampled_densities[:,None],
+        float(getattr(model_args, "init_spatial_lr_scale", 1.0)),
+    )
 
 def initialize_gaussian_from_vol(gaussians: GaussianModel, model_args, optim_args, scene: SceneVol):
     # Calculate initial gaussian count
@@ -184,6 +234,8 @@ def initialize_gaussian_from_vol(gaussians: GaussianModel, model_args, optim_arg
                                                 n_points, 
                                                 scanner_cfg, 
                                                 model_args.init_mode,
-                                                model_args.density_rescale)
+                                                model_args.density_rescale,
+                                                getattr(model_args, "density_init_scale", 1.0),
+                                                getattr(model_args, "init_seed", 0))
 
     gaussians.create_from_pcd(sampled_positions, sampled_densities[:,None], 1.0)

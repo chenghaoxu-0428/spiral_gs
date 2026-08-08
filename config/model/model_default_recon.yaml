@@ -1,11 +1,14 @@
 num_gaussians: 50000
 data_source_path: "data/synthetic_dataset/cone_ntrain_50_angle_360/1_pepper_cone" # path to the data (r2 style)
 model_path: "models/recon/1_pepper_cone" # path to save/load the model checkpoints
-init_mode: 'auto' # prefer dataset init_*.npy; fall back to gradient FDK
+init_mode: 'auto' # prefer dataset init_*.npy; otherwise generate the R2-style uniform FDK initialization
 prior_path: "" # Set path to specific point cloud if "prior" mode used for initialization.
 init_spatial_lr_scale: 1.0 # preserve r2_gaussian_spiral learning-rate semantics
 density_thresh: 0.05 # volume density (voxel intensity) for filtering out background in initialization
 density_rescale: 0.15 # Empirical density rescaling to factor in gaussian occlusions (many gaussians contributing to a voxel)
+density_init_scale: 1.0 # 1.0 matches R2-Gaussian; use 0.25 only to reproduce the old FaCT-GS online initialization
+init_seed: 0 # deterministic sampling, matching R2-Gaussian initialize_pcd.py
+save_generated_init: True # cache an online FDK initialization as init_<dataset>.npy for repeatable runs
 scale_min: 0.0005 # Percent of volume size
 scale_max: 0.5 # Percent of volume size
 eval: True

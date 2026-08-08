@@ -4,7 +4,8 @@ import torch
 import torch.nn.functional as F
 import yaml
 
-from fact_gs.r2_gaussian.utils.loss_utils import ssim
+from fact_gs.r2_gaussian.utils.loss_utils import frequency_magnitude_loss, ssim
+from fact_gs.r2_gaussian.utils.image_utils import metric_vol
 from fact_gs.rasterize import _quality_safe_tile_bounds
 
 
@@ -39,13 +40,50 @@ def test_legacy_ssim_is_numerically_identical():
     assert torch.isfinite(pred.grad).all()
 
 
+def test_volume_ssim_matches_r2_three_axis_slice_average():
+    generator = torch.Generator().manual_seed(11)
+    target = torch.rand((5, 6, 7), generator=generator)
+    pred = torch.rand((5, 6, 7), generator=generator)
+    expected_axes = []
+    for axis in range(3):
+        values = []
+        for index in range(target.shape[axis]):
+            target_slice = target.select(axis, index)
+            pred_slice = pred.select(axis, index)
+            values.append(ssim(target_slice[None, None], pred_slice[None, None]))
+        expected_axes.append(torch.stack(values).mean().item())
+
+    actual, actual_axes = metric_vol(target, pred, "ssim")
+    assert actual_axes == expected_axes
+    assert actual == sum(expected_axes) / 3
+
+
+def test_optional_frequency_loss_is_stable_and_differentiable():
+    target = torch.zeros((1, 32, 34))
+    target[:, ::2, ::2] = 1
+    identical = target.clone().requires_grad_(True)
+    zero_loss = frequency_magnitude_loss(identical, target, highpass_cutoff=0.1)
+    torch.testing.assert_close(zero_loss, torch.zeros_like(zero_loss), atol=1e-7, rtol=0)
+
+    pred = torch.zeros_like(target, requires_grad=True)
+    loss = frequency_magnitude_loss(pred, target, highpass_cutoff=0.1)
+    assert torch.isfinite(loss) and loss > 0
+    loss.backward()
+    assert pred.grad is not None and torch.isfinite(pred.grad).all()
+
+
 def test_reconstruction_defaults_preserve_r2_quality_budget():
     model = yaml.safe_load((ROOT / "config/model/model_default_recon.yaml").read_text())
     optim = yaml.safe_load((ROOT / "config/optim/optim_default_recon.yaml").read_text())
     assert model["init_mode"] == "auto"
     assert model["init_spatial_lr_scale"] == 1.0
+    assert model["density_rescale"] == 0.15
+    assert model["density_init_scale"] == 1.0
+    assert model["init_seed"] == 0
+    assert model["save_generated_init"] is True
     assert optim["steps"] == 30_000
     assert optim["use_fused_ssim"] is False
+    assert optim["lambda_frequency"] == 0.0
     assert optim["max_num_gaussians_absolute"] == 500_000
     assert optim["densify_from_step"] == 500
     assert optim["densify_until_step_percent"] == 0.5

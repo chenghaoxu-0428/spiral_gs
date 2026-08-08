@@ -10,12 +10,18 @@ import tigre ## For some reason, tigre needs to be imported before torch to avoi
 import torch
 import sys
 import yaml
+from torch.utils.tensorboard import SummaryWriter
 
 sys.path.append("./")
 from fact_gs.r2_gaussian.gaussian import GaussianModel, initialize_gaussian_from_proj, initialize_gaussian, initialize_gaussian_from_prior
 from fact_gs.r2_gaussian.utils.general_utils import safe_state
 from fact_gs.r2_gaussian.dataset import SceneRecon
-from fact_gs.r2_gaussian.utils.loss_utils import l1_loss, ssim, tv_3d_loss
+from fact_gs.r2_gaussian.utils.loss_utils import (
+    frequency_magnitude_loss,
+    l1_loss,
+    ssim,
+    tv_3d_loss,
+)
 from fact_gs.r2_gaussian.utils.image_utils import metric_vol, metric_proj
 
 from fact_gs import rasterize_proj, voxelize_vol
@@ -32,17 +38,27 @@ def train_recon(config):
     safe_state(False)
     torch.autograd.set_detect_anomaly(False)  
 
+    tb_writer = None
+    if config.tensorboard.enabled:
+        tensorboard_path = osp.join(config.model.model_path, "tensorboard")
+        tb_writer = SummaryWriter(tensorboard_path)
+        print(f"TensorBoard logs: {tensorboard_path}")
+
     profiler = setup_profiler(config.profile, config.model.model_path)
 
-    if profiler is not None:
-        with profiler:
-            optimize(config, profiler)
+    try:
+        if profiler is not None:
+            with profiler:
+                optimize(config, profiler, tb_writer)
+        else:
+            optimize(config, tb_writer=tb_writer)
+    finally:
+        if tb_writer is not None:
+            tb_writer.flush()
+            tb_writer.close()
 
-    else:
-        optimize(config)
 
-
-def optimize(config, profiler=None):
+def optimize(config, profiler=None, tb_writer=None):
     """Run the full reconstruction optimization loop.
 
     Args:
@@ -86,13 +102,22 @@ def optimize(config, profiler=None):
         init_path = osp.join(
             model_args.data_source_path, f"init_{dataset_name}.npy"
         )
-        init_mode = "precomputed" if osp.exists(init_path) else "gradient"
+        # Match the r2_gaussian/r2_gaussian_spiral cold-start baseline.  Their
+        # initialize_pcd.py uniformly samples foreground voxels from an FDK
+        # volume, saves the result, and then trains from that file.  "intensity"
+        # is the historical FaCT-GS name for this uniform sampling strategy.
+        init_mode = "precomputed" if osp.exists(init_path) else "intensity"
         print(f"Auto initialization selected '{init_mode}'.")
 
     if init_mode == "precomputed":
         initialize_gaussian(gaussians, model_args, None)
     elif init_mode in ["gradient", "intensity"]:
-        initialize_gaussian_from_proj(gaussians, model_args, optim_args, scene)
+        # Pass the resolved mode explicitly.  Previously the auto fallback
+        # still passed model_args.init_mode == "auto" into sample_vol(), where
+        # it matched no sampling branch and left sampled_indices undefined.
+        initialize_gaussian_from_proj(
+            gaussians, model_args, optim_args, scene, init_mode=init_mode
+        )
     elif init_mode == "prior":
         initialize_gaussian_from_prior(gaussians, model_args)
     else:
@@ -163,6 +188,17 @@ def optimize(config, profiler=None):
             loss_dssim = 1.0 - ssim_value
             loss["dssim"] = loss_dssim
             loss["total"] = loss["total"] + optim_args.lambda_dssim * loss_dssim
+        lambda_frequency = float(getattr(optim_args, "lambda_frequency", 0.0))
+        if lambda_frequency > 0:
+            loss_frequency = frequency_magnitude_loss(
+                image,
+                gt_image,
+                highpass_cutoff=float(
+                    getattr(optim_args, "frequency_highpass_cutoff", 0.1)
+                ),
+            )
+            loss["frequency"] = loss_frequency
+            loss["total"] = loss["total"] + lambda_frequency * loss_frequency
 
         # 3D TV loss
         if use_tv:
@@ -241,6 +277,13 @@ def optimize(config, profiler=None):
                 metrics["loss_" + l] = loss[l].item()
             for param_group in gaussians.optimizer.param_groups:
                 metrics[f"lr_{param_group['name']}"] = param_group["lr"]
+            if tb_writer is not None and step % config.tensorboard.log_interval == 0:
+                for name, value in metrics.items():
+                    group = "loss" if name.startswith("loss_") else "learning_rate"
+                    tb_writer.add_scalar(f"{group}/{name}", value, step)
+                tb_writer.add_scalar(
+                    "scene/num_gaussians", gaussians.get_xyz.shape[0], step
+                )
             time_limit_seconds = getattr(optim_args, "training_time_limit_seconds", 0.0)
             time_limit_hit = time_limit_seconds > 0 and training_time_seconds >= time_limit_seconds
 
@@ -256,6 +299,7 @@ def optimize(config, profiler=None):
                 voxelizefunc,
                 init_mode,
                 force_eval=time_limit_hit,
+                tb_writer=tb_writer,
             )
 
             if eval_metrics is not None:
@@ -322,6 +366,7 @@ def log_training_status(
     voxelizeFunc,
     init_mode,
     force_eval=False,
+    tb_writer=None,
 ):
     """Evaluate/visualize model checkpoints and persist metrics.
 
@@ -370,6 +415,7 @@ def log_training_status(
             {"name": "render_train", "cameras": scene.getTrainCameras()},
             {"name": "render_test", "cameras": scene.getTestCameras()},
         ]
+        metrics_2d = {}
         psnr_2d, ssim_2d = None, None
         for config in validation_configs:
             if config["cameras"] and len(config["cameras"]) > 0:
@@ -396,6 +442,7 @@ def log_training_status(
                     "psnr_2d_projs": psnr_2d_projs,
                     "ssim_2d_projs": ssim_2d_projs,
                 }
+                metrics_2d[config["name"]] = eval_dict_2d
                 with open(
                     osp.join(eval_save_path, f"eval2d_{config['name']}.yml"),
                     "w",
@@ -403,6 +450,10 @@ def log_training_status(
                     yaml.dump(
                         eval_dict_2d, f, default_flow_style=False, sort_keys=False
                     )
+                tqdm.write(
+                    f"[STEP {step}] {config['name']}: "
+                    f"PSNR2D {psnr_2d:.3f}, SSIM2D {ssim_2d:.4f}"
+                )
 
         # Evaluate 3D reconstruction performance
         voxelize_pkg = voxelizeFunc(scene.gaussians)
@@ -411,19 +462,60 @@ def log_training_status(
             vol_pred = torch.flip(vol_pred, dims=[0])
         vol_gt = scene.vol_gt
         psnr_3d, _ = metric_vol(vol_gt, vol_pred, "psnr")
-        ssim_3d, _ = metric_vol(vol_gt, vol_pred, "ssim")
+        ssim_3d, ssim_3d_axis = metric_vol(vol_gt, vol_pred, "ssim")
         eval_metrics = {
             "psnr_3d": float(psnr_3d),
-            "ssim_3d": float(ssim_3d.item()),
+            "ssim_3d": float(ssim_3d),
+            "ssim_3d_x": float(ssim_3d_axis[0]),
+            "ssim_3d_y": float(ssim_3d_axis[1]),
+            "ssim_3d_z": float(ssim_3d_axis[2]),
             "step": float(step),
             "iteration": float(iter_num),
         }
+        for split_name, split_metrics in metrics_2d.items():
+            eval_metrics[f"{split_name}_psnr_2d"] = float(split_metrics["psnr_2d"])
+            eval_metrics[f"{split_name}_ssim_2d"] = float(split_metrics["ssim_2d"])
         eval_dict = {
             "psnr_3d": eval_metrics["psnr_3d"],
             "ssim_3d": eval_metrics["ssim_3d"],
+            "ssim_3d_x": eval_metrics["ssim_3d_x"],
+            "ssim_3d_y": eval_metrics["ssim_3d_y"],
+            "ssim_3d_z": eval_metrics["ssim_3d_z"],
         }
         with open(osp.join(eval_save_path, "eval3d.yml"), "w") as f:
             yaml.dump(eval_dict, f, default_flow_style=False, sort_keys=False)
+
+        if tb_writer is not None:
+            for split_name, split_metrics in metrics_2d.items():
+                tb_writer.add_scalar(
+                    f"projection/{split_name}_psnr_2d",
+                    split_metrics["psnr_2d"],
+                    step,
+                )
+                tb_writer.add_scalar(
+                    f"projection/{split_name}_ssim_2d",
+                    split_metrics["ssim_2d"],
+                    step,
+                )
+            tb_writer.add_scalar("reconstruction/psnr_3d", psnr_3d, step)
+            tb_writer.add_scalar("reconstruction/ssim_3d", ssim_3d, step)
+            for axis_name, axis_value in zip("xyz", ssim_3d_axis):
+                tb_writer.add_scalar(
+                    f"reconstruction/ssim_3d_{axis_name}", axis_value, step
+                )
+            center = vol_gt.shape[0] // 2
+            gt_slice = vol_gt[center].detach().float().cpu()
+            pred_slice = vol_pred[center].detach().float().cpu()
+            comparison = torch.stack(
+                [gt_slice, pred_slice, torch.abs(gt_slice - pred_slice)], dim=0
+            )
+            tb_writer.add_image(
+                "reconstruction/center_slice_gt_pred_error", comparison, step
+            )
+            tb_writer.add_histogram(
+                "scene/density", scene.gaussians.get_density.detach().cpu(), step
+            )
+            tb_writer.flush()
         
         tqdm.write(
             f"[STEP {step}] Iter: {int(np.floor(iter_num))}, Training Time: {training_time_seconds:.2f}s. Evaluating: psnr3d {psnr_3d:.3f}, ssim3d {ssim_3d:.3f}, psnr2d {psnr_2d:.3f}, ssim2d {ssim_2d:.3f}"

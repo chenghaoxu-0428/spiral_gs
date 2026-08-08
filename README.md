@@ -66,11 +66,15 @@ Both reconstruction and volume fitting expect the r2_gaussian data layout (```me
 * **data_source_path** - Path to the source data folder used during optimization
 * **model_path** - Directory where checkpoints, evaluation dumps and exported point clouds are saved
 * **init_mode** - How Gaussians are initialized:
-    * ```gradient``` - gaussian locations sampled based on a probability distribution from a gradient of an FDK-reconstructed volume
-    * ```intensity``` - above, but using intensities directly and not their gradients
+    * ```auto``` - load `init_<dataset>.npy` when present; otherwise reproduce the R2-Gaussian FDK initialization (`intensity`) and cache it under that name
+    * ```gradient``` - Gaussian locations sampled using the Sobel-gradient magnitude of an FDK-reconstructed volume as the probability distribution
+    * ```intensity``` - R2-Gaussian-compatible uniform random sampling over FDK voxels above `density_thresh` (the historical mode name is retained for compatibility)
     * ```precomputed/prior``` - only applicable for reconstruction (see below)
 * *density_thresh* - Minimum voxel density used to discard background voxels during initialization
 * *density_rescale* - Empirical scaling applied to the sampled densities to compensate for multi-Gaussian occlusion
+* *density_init_scale* - Additional initialization-only density multiplier; `1.0` matches R2-Gaussian, while `0.25` reproduces the older FaCT-GS online behavior
+* *init_seed* - Random seed used by online voxel sampling
+* *save_generated_init* - Cache an auto-generated R2-style initialization as `init_<dataset>.npy` for reproducible future runs
 * *scale_min* / *scale_max* - Lower and upper scale bounds expressed as a fraction of the target volume, converted to world units at runtime
 * *eval* - When False only the training cameras are loaded from ```meta_data.json```
 
@@ -82,6 +86,8 @@ Both reconstruction and volume fitting expect the r2_gaussian data layout (```me
 * *rotation_lr_init/final/max_steps* - Learning rate schedule for spherical harmonics rotations
 * *lambda_dssim* - Weight of the DSSIM loss component (set to 0 to disable)
 * *lambda_tv* - Weight of the 3D total-variation regularizer
+* *lambda_frequency* - Optional log-Fourier-magnitude loss on high-frequency projection content; disabled by default so the R2 baseline remains unchanged
+* *frequency_highpass_cutoff* - Radial frequency cutoff relative to Nyquist used by the optional frequency loss
 * *ssim3d_early_stop / ssim3d_early_stop_threshold* - Optional early-stopping guard. When enabled, training exits as soon as the reported 3D SSIM reaches or exceeds the provided threshold. Useful for time-to-SSIM studies (defaults to disabled).
 * *training_time_limit_seconds* - Optional wall-clock limit (seconds). When >0, stops training once the accumulated training time crosses the threshold.
 * **densify_gaussians** - Enables/disables periodic Gaussian densification and pruning
@@ -99,6 +105,15 @@ Both reconstruction and volume fitting expect the r2_gaussian data layout (```me
 * *extra_eval_iter_num* - (optional) specific iteration to force an additional evaluation and metric export; useful for catching early progress snapshots such as the 150-iteration dumps used in the paper (`eval_default_extra_150`). For reconstruction runs, iterations equal full sweeps over the training cameras, while for volume fitting `iteration == step`.
 * *visualize_at_eval* - When enabled, dumps reconstructed volumes (tiff + preview) at evaluation checkpoints
 * *visualize_gaussians* - Exports Gaussian position/footprint visualizations and error maps for debugging
+
+The reported 3D SSIM follows the original R2-Gaussian protocol: 2D SSIM is
+averaged over non-empty ground-truth slices along X, Y and Z, followed by an
+average over the three axes. It is intentionally not replaced by a volumetric
+SSIM kernel because the two metrics are not numerically comparable.
+
+TensorBoard logging is enabled by default for reconstruction. Event files are
+written to `<model_path>/tensorboard`; disable it with
+`tensorboard.enabled=false` when desired.
 
 **Profiling:**
 * *profile* - Turns PyTorch's profiler on/off

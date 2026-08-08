@@ -41,6 +41,28 @@ def l2_loss(network_output, gt):
     return ((network_output - gt) ** 2).mean()
 
 
+def frequency_magnitude_loss(pred, target, highpass_cutoff=0.1, eps=1e-6):
+    """Compare log Fourier magnitudes above a normalized radial cutoff."""
+    if pred.shape != target.shape:
+        raise ValueError(
+            f"Frequency loss requires equal shapes, got {pred.shape} and {target.shape}."
+        )
+    cutoff = float(max(0.0, min(1.0, highpass_cutoff)))
+    pred_spectrum = torch.fft.rfft2(pred.float(), norm="ortho")
+    target_spectrum = torch.fft.rfft2(target.float(), norm="ortho")
+    pred_magnitude = torch.log1p(torch.abs(pred_spectrum) + eps)
+    target_magnitude = torch.log1p(torch.abs(target_spectrum) + eps)
+
+    height, width = pred.shape[-2:]
+    fy = torch.fft.fftfreq(height, device=pred.device).abs() / 0.5
+    fx = torch.fft.rfftfreq(width, device=pred.device) / 0.5
+    radius = torch.sqrt(fy[:, None].square() + fx[None, :].square())
+    mask = radius >= cutoff
+    if not torch.any(mask):
+        return pred_magnitude.new_zeros(())
+    return torch.abs(pred_magnitude[..., mask] - target_magnitude[..., mask]).mean()
+
+
 def _ssim_window(window_size, channel, dtype, device):
     weights = torch.tensor(
         [exp(-((x - window_size // 2) ** 2) / (2 * 1.5**2)) for x in range(window_size)],

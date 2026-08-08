@@ -13,7 +13,7 @@ import numpy as np
 import torch
 
 sys.path.append("./")
-from fused_ssim import fused_ssim, fused_ssim3d
+from fact_gs.r2_gaussian.utils.loss_utils import ssim
 
 
 def mse(img1, img2, mask=None):
@@ -103,8 +103,23 @@ def metric_vol(img1, img2, metric="psnr", pixel_max=1.0):
         psnr_out = 10 * torch.log10(pixel_max**2 / mse_out.float())
         return psnr_out.item(), None
     elif metric == "ssim":
-        # Replaced manual loss calculation with fused_ssim
-        return fused_ssim3d(img1[None,None],img2[None,None]), None
+        # Preserve the published R2-Gaussian metric. It averages 2D SSIM over
+        # non-empty GT slices along each anatomical axis. fused_ssim3d computes
+        # a different quantity and cannot be compared to the legacy scores.
+        ssims = []
+        for axis in [0, 1, 2]:
+            results = []
+            for i in range(img1.shape[axis]):
+                if axis == 0:
+                    slice1, slice2 = img1[i, :, :], img2[i, :, :]
+                elif axis == 1:
+                    slice1, slice2 = img1[:, i, :], img2[:, i, :]
+                else:
+                    slice1, slice2 = img1[:, :, i], img2[:, :, i]
+                if slice1.max() > 0:
+                    results.append(ssim(slice1[None, None], slice2[None, None]))
+            ssims.append(torch.stack(results).mean().item() if results else 0.0)
+        return float(np.mean(ssims)), ssims
 
 
 @torch.no_grad()
@@ -146,7 +161,7 @@ def metric_proj(img1, img2, metric="psnr", axis=2, pixel_max=1.0):
                     slice1[None, None], slice2[None, None], pixel_max=pixel_max
                 )
             elif metric == "ssim":
-                result = fused_ssim(slice1[None, None], slice2[None, None])
+                result = ssim(slice1[None, None], slice2[None, None])
             else:
                 raise NotImplementedError
             count += 1

@@ -7,3 +7,4 @@ defaults:
     - optim: optim_fromPrior_recon
     - eval: eval_1000
     - profile: profile_no
+    - tensorboard: default

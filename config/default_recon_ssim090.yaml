@@ -7,3 +7,4 @@ defaults:
     - optim: optim_default_recon_ssim090
     - eval: eval_default
     - profile: profile_no
+    - tensorboard: default

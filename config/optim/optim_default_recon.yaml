@@ -13,6 +13,8 @@ rotation_lr_final: 0.0001
 rotation_lr_max_steps: 1.0 #percentage of total steps
 lambda_dssim: 0.25 # match the quality-oriented r2_gaussian_spiral baseline
 use_fused_ssim: false # exact legacy loss by default; enable for maximum throughput
+lambda_frequency: 0.0 # optional log-magnitude high-frequency projection loss; keep 0 for the R2 baseline
+frequency_highpass_cutoff: 0.1 # radial cutoff relative to detector Nyquist frequency
 lambda_tv: 0.05 # weight for the TV loss
 tv_vol_size: 32 # volume sample size (cube width) for computing the TV loss
 
