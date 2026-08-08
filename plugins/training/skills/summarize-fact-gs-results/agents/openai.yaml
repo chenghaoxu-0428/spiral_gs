@@ -1,0 +1,4 @@
+interface:
+  display_name: "FaCT-GS 实验汇总"
+  short_description: "将可比实验汇总成论文级 LaTeX 表格"
+  default_prompt: "使用 $summarize-fact-gs-results 将 FaCT-GS 实验结果整理成 LaTeX 表格。"

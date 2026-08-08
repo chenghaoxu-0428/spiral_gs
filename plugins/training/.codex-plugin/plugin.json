@@ -1,0 +1,33 @@
+{
+  "name": "fact-gs-training",
+  "version": "0.2.1",
+  "description": "FaCT-GS dataset, Hydra preflight, reconstruction, volume fitting, monitoring, and reporting workflows for Codex.",
+  "author": {
+    "name": "leggage",
+    "url": "https://github.com/leggage"
+  },
+  "homepage": "https://github.com/PaPieta/fact-gs",
+  "repository": "https://github.com/PaPieta/fact-gs",
+  "keywords": [
+    "fact-gs",
+    "computed-tomography",
+    "gaussian-splatting",
+    "hydra",
+    "training",
+    "cuda",
+    "codex"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "FaCT-GS Training",
+    "shortDescription": "Automate FaCT-GS experiments safely.",
+    "longDescription": "Prepare R2-compatible CT datasets, validate Hydra and CUDA environments, run FaCT-GS training in an independent live terminal, monitor logs and metrics, and generate experiment summaries.",
+    "developerName": "leggage",
+    "category": "DeveloperTools",
+    "capabilities": [
+      "Interactive",
+      "Write"
+    ],
+    "defaultPrompt": "Use the FaCT-GS training workflow to prepare, validate, run, and report my experiment."
+  }
+}

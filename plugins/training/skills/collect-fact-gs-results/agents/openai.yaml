@@ -1,0 +1,4 @@
+interface:
+  display_name: "FaCT-GS 结果采集"
+  short_description: "采集重建、拟合、压缩实验的指标、时间与产物"
+  default_prompt: "使用 $collect-fact-gs-results 统计这次 FaCT-GS 实验结果。"

@@ -1,0 +1,4 @@
+interface:
+  display_name: "FaCT-GS 训练自动化"
+  short_description: "在独立终端运行并监控 FaCT-GS 重建与体数据拟合"
+  default_prompt: "使用 $automate-fact-gs-training 帮我完成 FaCT-GS 训练流程。"

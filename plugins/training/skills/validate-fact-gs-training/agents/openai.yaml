@@ -1,0 +1,4 @@
+interface:
+  display_name: "FaCT-GS 训练预检"
+  short_description: "校验 Hydra 参数、数据与 CUDA 扩展环境"
+  default_prompt: "使用 $validate-fact-gs-training 在启动 FaCT-GS 训练前执行安全预检。"

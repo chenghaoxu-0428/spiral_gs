@@ -1,0 +1,4 @@
+interface:
+  display_name: "FaCT-GS 数据准备"
+  short_description: "生成并校验 FaCT-GS 使用的 R2 兼容 CT 数据"
+  default_prompt: "使用 $prepare-fact-gs-dataset 帮我准备 FaCT-GS 训练数据。"

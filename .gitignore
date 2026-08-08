@@ -2,3 +2,6 @@ outputs/
 __pycache__
 .vscode/
 slurm/
+data/
+models/
+outputs/
