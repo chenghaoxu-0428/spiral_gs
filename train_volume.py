@@ -331,7 +331,7 @@ def log_training_status(
         ssim_3d, _ = metric_vol(vol_gt, vol_pred, "ssim")
         eval_metrics = {
             "psnr_3d": float(psnr_3d),
-            "ssim_3d": float(ssim_3d.item()),
+            "ssim_3d": float(ssim_3d),
             "step": float(step),
             "iteration": float(iter_num),
         }

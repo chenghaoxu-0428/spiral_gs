@@ -30,6 +30,7 @@ class CameraInfo(NamedTuple):
     height: int
     mode: int
     scanner_cfg: dict
+    z_shift: float = 0.0  # per-projection source z (scene units, same scale as scanner_cfg)
 
 
 class SceneInfo(NamedTuple):
@@ -165,6 +166,7 @@ def readCTameras(meta_data, source_path, eval=False, scene_scale=1.0):
                 height=cam_cfg["nDetector"][0],
                 mode=mode,
                 scanner_cfg=cam_cfg,
+                z_shift=frame_z_shift,
             )
             cam_infos[split].append(cam_info)
         sys.stdout.write("\n")
@@ -315,6 +317,7 @@ def readNAFInfo(path, eval):
                 height=scanner_cfg["nDetector"][0],
                 mode=mode,
                 scanner_cfg=scanner_cfg,
+                z_shift=frame_z_shift * scene_scale,
             )
             cam_infos[split].append(cam_info)
         sys.stdout.write("\n")

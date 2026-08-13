@@ -32,6 +32,7 @@ def loadCam(args, id, cam_info):
         image_name=cam_info.image_name,
         uid=id,
         data_device='cuda' if torch.cuda.is_available() else 'cpu',
+        z_shift=cam_info.z_shift,
     )
 
 

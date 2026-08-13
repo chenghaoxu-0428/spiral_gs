@@ -1,5 +1,6 @@
 import os
 import sys
+import copy
 import numpy as np
 import tigre
 import os.path as osp
@@ -7,6 +8,8 @@ import yaml
 import time
 import tigre.algorithms as algs
 from tqdm import trange
+from tigre.utilities.Atb import Atb
+from tigre.utilities.filtering import filtering
 from tigre.utilities.im3Dnorm import im3DNORM
 import matplotlib.pyplot as plt
 
@@ -14,9 +17,28 @@ sys.path.append("./")
 from fact_gs.r2_gaussian.utils.image_utils import metric_vol
 
 
-def recon_volume(projs, angles, geo, recon_method):
-    """Reconstruct ct with traditional methods."""
-    if recon_method == "fdk":
+def recon_volume(projs, angles, geo, recon_method, z_shifts=None):
+    """Reconstruct ct with traditional methods.
+
+    Args:
+        projs: Stacked projections, shape ``(n_views, n_rows, n_cols)``.
+        angles: Per-view rotation angles in radians.
+        geo: Base TIGRE geometry (scalar attributes, offOrigin as ``(3,)``).
+        recon_method: ``"fdk"`` or ``"cgls"``.
+        z_shifts: Optional per-view source z translation (same units as
+            ``geo``, i.e. scene units). When given and not all zero, uses the
+            helical per-view offOrigin FDK that matches the spiral camera
+            model of ``dataset_readers.angle2pose`` (source z = z_shift,
+            detector parallel to itself); otherwise keeps the legacy
+            circular path unchanged.
+    """
+    if z_shifts is not None and np.any(np.asarray(z_shifts) != 0):
+        if recon_method != "fdk":
+            raise NotImplementedError(
+                "Helical reconstruction is only supported for the 'fdk' method."
+            )
+        vol = fdk_helical(projs, angles, z_shifts, geo)
+    elif recon_method == "fdk":
         vol = algs.fdk(projs[:, ::-1, :], geo, angles)
     elif recon_method == "cgls":
         vol, _ = algs.cgls(projs[:, ::-1, :], geo, angles, 60, computel2=True)
@@ -24,6 +46,80 @@ def recon_volume(projs, angles, geo, recon_method):
         raise ValueError("Unsupported reconstruction method")
     vol = np.transpose(vol, (2, 1, 0))
     return vol
+
+
+def geo_with_per_view_offorigin(base_geo, z_shifts):
+    """Return a TIGRE geometry with per-view ``offOrigin`` z offsets.
+
+    A spiral acquisition moves the source/detector along z by ``z_shift``
+    while the volume stays fixed. TIGRE cannot shift the source along z, so
+    instead we shift the reconstruction volume by ``-z_shift`` per view:
+    the ray geometry is then identical (source at z=0, detector parallel to
+    itself). TIGRE's axis 0 is z, so the offset goes into column 0.
+
+    Args:
+        base_geo: Base TIGRE geometry with scalar attributes.
+        z_shifts: Per-view source z translations (scene units, shape ``(n,)``).
+
+    Returns:
+        Deep-copied geometry with ``offOrigin`` of shape ``(n, 3)``. ``DSD``
+        and ``DSO`` are scalarized to plain 1-element arrays because the
+        hand-rolled FDK path needs scalar values.
+    """
+    geo = copy.deepcopy(base_geo)
+    # Per-view helical geometry may carry vector DSD/DSO; the FDK path needs scalars.
+    for attr in ("DSD", "DSO"):
+        val = getattr(geo, attr, None)
+        if val is not None:
+            scalar = float(np.asarray(val, dtype=np.float64).reshape(-1)[0])
+            setattr(geo, attr, np.array([scalar], dtype=np.float32))
+    z = np.asarray(z_shifts, dtype=np.float32).reshape(-1)
+    base_origin = np.asarray(base_geo.offOrigin, dtype=np.float32).reshape(1, 3)
+    geo.offOrigin = base_origin + np.stack(
+        [-z, np.zeros_like(z), np.zeros_like(z)], axis=1
+    )
+    return geo
+
+
+def fdk_helical(projs, angles, z_shifts, geo, filter_name=None):
+    """Helical FDK via per-view ``offOrigin`` (cos weight -> filtering -> Atb).
+
+    Matches ``algs.fdk`` bit-for-bit when ``z_shifts`` is all zero, and
+    reproduces the spiral camera model of the training rasterizer (verified
+    against ``tigre.Ax`` on synthetic spiral data). ``filter_name`` follows
+    TIGRE's ``filtering`` convention (``None`` = default Ram-Lak).
+
+    Returns the volume in TIGRE layout ``[z, y, x]``; ``recon_volume``
+    applies the final transpose to storage layout.
+    """
+    geo = geo_with_per_view_offorigin(geo, z_shifts)
+    ang = np.asarray(angles, dtype=np.float32).reshape(-1)
+    geo.check_geo(ang)
+    geo.checknans()
+    geo.angles = ang
+    geo.filter = filter_name
+
+    # Same detector orientation convention as the legacy circular path:
+    # image rows are flipped to match TIGRE's v axis.
+    p = projs.astype(np.float32, copy=True)[:, ::-1, :]
+
+    # Cone-beam cosine weight (hand-rolled because algs.fdk does not accept
+    # a vectorized offOrigin geometry).
+    xv = (
+        np.arange(-geo.nDetector[1] / 2 + 0.5, 1 + geo.nDetector[1] / 2 - 0.5)
+        * geo.dDetector[1]
+    )
+    yv = (
+        np.arange(-geo.nDetector[0] / 2 + 0.5, 1 + geo.nDetector[0] / 2 - 0.5)
+        * geo.dDetector[0]
+    )
+    yy, xx = np.meshgrid(xv, yv)
+    dsd0 = float(np.asarray(geo.DSD).reshape(-1)[0])
+    w = dsd0 / np.sqrt(dsd0**2 + xx**2 + yy**2)
+    proj_weighted = np.zeros(p.shape, dtype=np.float32)
+    np.multiply(p, w, out=proj_weighted)
+    proj_filt = filtering(proj_weighted, geo, geo.angles, parker=False)
+    return Atb(proj_filt, geo, geo.angles, "FDK")
 
 
 def get_geometry_tigre(cfg):

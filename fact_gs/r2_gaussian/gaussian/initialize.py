@@ -179,12 +179,30 @@ def initialize_gaussian_from_proj(
         [t2a(cam.original_image) for cam in train_cameras], axis=0
     )
     angles_train = np.stack([t2a(cam.angle) for cam in train_cameras], axis=0)
+    z_shifts = np.stack([t2a(cam.z_shift) for cam in train_cameras], axis=0)
+    if np.any(z_shifts != 0):
+        print(
+            f"Spiral acquisition detected (|z_shift| max {np.abs(z_shifts).max():.3f} "
+            "scene units); using helical per-view FDK."
+        )
     scanner_cfg = scene.scanner_cfg
     geo = get_geometry_tigre(scanner_cfg)
 
     # vol = algs.fdk(projs_train, geo, angles_train, gpuids=gpuids)
-    vol = recon_volume(projs_train, angles_train, copy.deepcopy(geo), recon_method="fdk")
+    vol = recon_volume(
+        projs_train, angles_train, copy.deepcopy(geo), recon_method="fdk",
+        z_shifts=z_shifts,
+    )
     print("Reconstruction finished")
+
+    # FDK output scale is arbitrary (view count / ramp normalization
+    # dependent), while density_thresh sampling expects a [0, 1] volume.
+    # Normalize with a robust percentile (same convention as the spiral
+    # pseudo-GT pipeline) so thin/low-contrast phantoms are not emptied out
+    # by the absolute threshold.
+    vol = np.clip(vol, 0.0, None)
+    vol = vol / (np.percentile(vol, 99.5) + 1e-12)
+    vol = np.clip(vol, 0.0, 1.0)
 
     resolved_init_mode = init_mode or model_args.init_mode
     sampled_positions, sampled_densities = sample_vol(vol, 

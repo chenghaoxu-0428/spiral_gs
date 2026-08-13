@@ -34,6 +34,7 @@ class Camera(nn.Module):
         trans=np.array([0.0, 0.0, 0.0]),
         scale=1.0,
         data_device="cuda",
+        z_shift=0.0,
     ):
         super(Camera, self).__init__()
 
@@ -42,6 +43,7 @@ class Camera(nn.Module):
         self.R = R
         self.T = T
         self.angle = angle
+        self.z_shift = z_shift
         self.FoVx = FoVx
         self.FoVy = FoVy
         self.mode = mode
