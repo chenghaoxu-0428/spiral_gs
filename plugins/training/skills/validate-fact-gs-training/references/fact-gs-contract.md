@@ -31,4 +31,6 @@ Both entry points use R2-Gaussian-style `meta_data.json`. Reconstruction consume
 
 Volume fitting requires `model.vol_name` (normally `vol_prior` or `vol_gt`) as `.npy` or `.tiff`. Outputs may include `ckpt/`, `point_cloud/step_<N>/point_cloud.pickle`, reconstructed TIFF/preview files, evaluation YAML, a sibling `<model>_metrics_final.yml`, and reconstruction TensorBoard events under `<model_path>/tensorboard`.
 
+Reconstruction `<model>_metrics_final.yml` written by `train_recon.py` includes `psnr_3d`, `ssim_3d`, test-split `psnr_2d` / `ssim_2d`, and `time_training_seconds`. Volume fitting writes the same schema; `psnr_2d` / `ssim_2d` may be null when projection metrics are unavailable.
+
 `optim.steps` is the global optimization step count. In reconstruction, an evaluation iteration is a complete sweep of training projections; for volume fitting, step and iteration are equivalent.

@@ -22,7 +22,9 @@ description: Collect and validate FaCT-GS reconstruction, volume-fitting, compre
 - dataset/case, acquisition geometry and split size when known
 - task (`recon`, `volume-prior`, or `compression`), config name, initialization mode, and method label
 - final step/iteration and stopping reason
-- 3D PSNR/SSIM; 2D projection PSNR/SSIM for reconstruction when emitted
+- From sibling `<model>_metrics_final.yml` when present: `psnr_3d`, `ssim_3d`, `psnr_2d`, `ssim_2d`, and `time_training_seconds`
+- Reconstruction `metrics_final.yml` must include test-split 2D projection PSNR/SSIM as `psnr_2d` / `ssim_2d` (sourced from `render_test_*` evaluation). Treat missing 2D keys as incomplete recon output, not optional.
+- Volume-prior/compression may leave `psnr_2d` / `ssim_2d` null when projection evaluation was not run
 - training time in seconds and minutes, converted once from `time_training_seconds` or `training_time_seconds`
 - final Gaussian count and model/compressed size when requested and supported
 - paths to the final volume, point cloud, config/run log, and every metric source

@@ -48,6 +48,36 @@ def recon_volume(projs, angles, geo, recon_method, z_shifts=None):
     return vol
 
 
+def normalize_fdk_volume(vol):
+    """Match the training-time FDK intensity normalization."""
+    vol = np.clip(vol, 0.0, None)
+    vol = vol / (np.percentile(vol, 99.5) + 1e-12)
+    return np.clip(vol, 0.0, 1.0)
+
+
+def sample_intensity_volume(
+    vol, density_thresh, n_points, scanner_cfg, density_rescale,
+    density_init_scale=1.0, seed=0,
+):
+    """Uniformly sample normalized foreground voxels for initialization."""
+    valid_indices = np.argwhere(vol > density_thresh)
+    assert len(valid_indices) >= n_points, (
+        "Valid voxels less than target number of sampling. Check threshold"
+    )
+    rng = np.random.RandomState(seed)
+    sampled_indices = valid_indices[
+        rng.choice(len(valid_indices), n_points, replace=False)
+    ]
+    sampled_positions = (
+        sampled_indices * np.asarray(scanner_cfg["dVoxel"])
+        - np.asarray(scanner_cfg["sVoxel"]) / 2
+        + np.asarray(scanner_cfg["offOrigin"])
+    )
+    sampled_densities = vol[tuple(sampled_indices.T)]
+    sampled_densities *= density_rescale * density_init_scale
+    return sampled_positions, sampled_densities
+
+
 def geo_with_per_view_offorigin(base_geo, z_shifts):
     """Return a TIGRE geometry with per-view ``offOrigin`` z offsets.
 

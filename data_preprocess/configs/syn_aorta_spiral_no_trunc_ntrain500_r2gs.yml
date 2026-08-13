@@ -1,18 +1,15 @@
-dataset_type: real
-organ: ldctc001
-model: r2gs
-raw_gt: /opt/data/private/data/ldctc001/ldct_c001.npy
-raw_proj: /opt/data/private/data/ldctc001/01-31-2022-NA-NA-49153/1.000000-Full Dose Projections-31861
+dataset_type: syn
+organ: aorta
+model: r2gs_no_trunc
+raw_gt: /opt/data/private/data/three_organs/aorta/EAY131-1097567/12-16-1959-NA-CTCAPWOCONTRAST-91713/301.000000-CAPiDose3-66377
 gt_xy_invert: false
 output_root: data
-n_train: 400
-n_test: 1500
+n_train: 500
+n_test: 1000
 seed: 0
 
 stitch:
   enabled: false
-  n_train: 100
-  n_test: 100
 
 object_scale: 50
 proj_rescale: 400
@@ -28,15 +25,14 @@ scanner:
   offOrigin: [0, 0, 0]
   offDetector: [0, 0]
   accuracy: 0.5
-  coord_left: true
+  coord_left: false
   filter: null
   noise: false
-  possion_noise: 100000
-  gaussian_noise: [0, 10]
 
 spiral:
-  z_start: -12
-  z_end: 12
+  # Conservative cone-beam margin using the 16x16 transverse diagonal.
+  z_start: -10.672757975355804
+  z_end: 10.672757975355804
   pitch: 0.9844
   sample_per_rotation: 984
   angle_start: 0
@@ -45,8 +41,3 @@ init:
   n_points: 50000
   density_threshold: auto
   density_rescale: 0.15
-
-real:
-  auto_svoxel_from_zshift: true
-  equal_xyz_span: true
-  min_svoxel_span: 1.0e-6

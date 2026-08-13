@@ -13,7 +13,12 @@ from fact_gs.r2_gaussian.utils.general_utils import t2a
 from fact_gs.r2_gaussian.utils.graphics_utils import fetchPly
 from fact_gs.r2_gaussian.utils.system_utils import searchForMaxStep
 from fact_gs.r2_gaussian.dataset import SceneRecon, SceneVol
-from fact_gs.r2_gaussian.utils.ct_utils import get_geometry_tigre, recon_volume
+from fact_gs.r2_gaussian.utils.ct_utils import (
+    get_geometry_tigre,
+    normalize_fdk_volume,
+    recon_volume,
+    sample_intensity_volume,
+)
 
 
 def initialize_gaussian(gaussians: GaussianModel, model_args, loaded_step=None):
@@ -195,24 +200,23 @@ def initialize_gaussian_from_proj(
     )
     print("Reconstruction finished")
 
-    # FDK output scale is arbitrary (view count / ramp normalization
-    # dependent), while density_thresh sampling expects a [0, 1] volume.
-    # Normalize with a robust percentile (same convention as the spiral
-    # pseudo-GT pipeline) so thin/low-contrast phantoms are not emptied out
-    # by the absolute threshold.
-    vol = np.clip(vol, 0.0, None)
-    vol = vol / (np.percentile(vol, 99.5) + 1e-12)
-    vol = np.clip(vol, 0.0, 1.0)
+    vol = normalize_fdk_volume(vol)
 
     resolved_init_mode = init_mode or model_args.init_mode
-    sampled_positions, sampled_densities = sample_vol(vol, 
-                                                    model_args.density_thresh, 
-                                                    n_points, 
-                                                    scanner_cfg, 
-                                                    resolved_init_mode,
-                                                    model_args.density_rescale,
-                                                    getattr(model_args, "density_init_scale", 1.0),
-                                                    getattr(model_args, "init_seed", 0))
+    if resolved_init_mode == "intensity":
+        sampled_positions, sampled_densities = sample_intensity_volume(
+            vol, model_args.density_thresh, n_points, scanner_cfg,
+            model_args.density_rescale,
+            getattr(model_args, "density_init_scale", 1.0),
+            getattr(model_args, "init_seed", 0),
+        )
+    else:
+        sampled_positions, sampled_densities = sample_vol(
+            vol, model_args.density_thresh, n_points, scanner_cfg,
+            resolved_init_mode, model_args.density_rescale,
+            getattr(model_args, "density_init_scale", 1.0),
+            getattr(model_args, "init_seed", 0),
+        )
 
     # Only the R2-equivalent uniform initializer owns the canonical
     # init_<dataset>.npy name.  An explicitly requested gradient experiment

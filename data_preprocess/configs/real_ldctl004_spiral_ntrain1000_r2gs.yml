@@ -1,12 +1,11 @@
 dataset_type: real
-organ: ldctc001
+organ: ldctl004
 model: r2gs
-raw_gt: /opt/data/private/data/ldctc001/ldct_c001.npy
-raw_proj: /opt/data/private/data/ldctc001/01-31-2022-NA-NA-49153/1.000000-Full Dose Projections-31861
+raw_gt: /opt/data/private/data/ldctl004/LDCT-and-Projection-data/L004/12-23-2021-NA-NA-40641/1.000000-Full Dose Images-63186
+raw_proj: /opt/data/private/data/ldctl004/LDCT-and-Projection-data/L004/08-21-2018-NA-NA-10971/1.000000-Full dose projections-24362
 gt_xy_invert: false
 output_root: data
-n_train: 400
-n_test: 1500
+n_train: 1000
 seed: 0
 
 stitch:
@@ -16,6 +15,7 @@ stitch:
 
 object_scale: 50
 proj_rescale: 400
+proj_subsample: 4
 
 scanner:
   mode: cone

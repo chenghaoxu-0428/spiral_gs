@@ -14,14 +14,6 @@ raw_info = [
     #     "xy_invert": False,
     # },
 
-   
-    {
-        "raw_path": "data/LDCT-L004/3DSLICES",
-        "output_name": "ldctl004_no_norm_plus",
-        "file_type": "dcm",
-        "thickness": None,
-        "xy_invert": False,
-    },  
     # {
     #     "raw_path": "data/abdomen",
     #     "output_name": "abdomen",

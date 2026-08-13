@@ -537,7 +537,7 @@ print(find_packages())
 setup(
     packages=find_packages(),
     include_package_data=True,
-    data_files=[("data", ["Common/data/head.mat"])],
+    data_files=[("data", ["Common/data/head.mat"])] if os.path.isfile("Common/data/head.mat") else [],
     ext_modules=[minPICCS_ext, Ax_ext, Atb_ext, tv_proximal_ext, minTV_ext, AwminTV_ext, gpuUtils_ext, RandomNumberGenerator_ext],
     py_modules=["tigre.py"],
     cmdclass={"build_ext": BuildExtension},

@@ -5,3 +5,7 @@ slurm/
 data/
 models/
 outputs/
+training_logs/
+.cursor/
+.hypothesis/
+.claude/

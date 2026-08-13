@@ -17,6 +17,7 @@ stitch:
 
 object_scale: 50
 proj_rescale: 400
+proj_subsample: 1                   # int, 1=no downsampling; >1 resize pixels by 1/factor, spacing scaled up to preserve physical detector size
 
 scanner:
   mode: cone

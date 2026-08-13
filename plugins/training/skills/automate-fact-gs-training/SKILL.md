@@ -43,7 +43,7 @@ description: Automate end-to-end FaCT-GS experiments in this repository. Use whe
 8. Report one compact status line using the latest native progress and evaluation output:
    `Train: <step>/<steps> (<percent>%) | loss <loss> | ssim3d <value> | psnr3d <value> | ssim2d <value> | psnr2d <value>`
    Keep the latest evaluation values until replaced. Use `?` before first observation. For reconstruction only, `<model_path>/tensorboard` is a fallback when PTY output is unavailable.
-9. Continue monitoring until completion when requested, then invoke `collect-fact-gs-results`.
+9. Continue monitoring until completion when requested, then invoke `collect-fact-gs-results`. For reconstruction, confirm sibling `<model>_metrics_final.yml` contains `psnr_3d`, `ssim_3d`, `psnr_2d`, `ssim_2d`, and `time_training_seconds`.
 
 ## Project-specific guardrails
 

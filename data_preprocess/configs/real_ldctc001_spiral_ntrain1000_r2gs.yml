@@ -1,8 +1,8 @@
 dataset_type: real
 organ: ldctc001
 model: r2gs
-raw_gt: /home/xielei/r2_gaussian_spiral/r2_gaussian_spiral/data/ldctc001/02-04-2022-NA-NA-00775/304.000000-Full Dose Images-32775
-raw_proj: /home/xielei/r2_gaussian_spiral/r2_gaussian_spiral/data/ldctc001/01-31-2022-NA-NA-49153/1.000000-Full Dose Projections-31861
+raw_gt: /opt/data/private/data/ldctc001/ldct_c001.npy
+raw_proj: /opt/data/private/data/ldctc001/01-31-2022-NA-NA-49153/1.000000-Full Dose Projections-31861
 gt_xy_invert: false
 output_root: data
 n_train: 1000

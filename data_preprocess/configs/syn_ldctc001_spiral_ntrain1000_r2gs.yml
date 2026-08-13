@@ -1,0 +1,53 @@
+dataset_type: syn
+organ: ldctc001
+model: r2gs
+raw_gt: /opt/data/private/data/ldctc001/ldct_c001.npy
+gt_xy_invert: false
+output_root: data
+n_train: 1000
+n_test: 1500
+seed: 0
+
+stitch:
+  enabled: false
+  n_train: 100
+  n_test: 100
+
+# Scanner geometry mirrors the real ldctc001 spiral dataset final geometry
+# (data/real/ldctc001/spiral/ntrain1000/r2gs meta_data.json, after
+# auto_svoxel_from_zshift / equal_xyz_span), so the synthetic twin matches
+# the real acquisition voxel-for-voxel.
+scanner:
+  mode: cone
+  DSD: 47.33729858398438
+  DSO: 26.9260009765625
+  nDetector: [64, 888]
+  sDetector: [3.51610336303711, 45.46116142272949]
+  nVoxel: [256, 256, 256]
+  sVoxel: [18.006858348846436, 18.006858348846436, 18.006858348846436]
+  offOrigin: [0, 0, -7.739479303359985]
+  offDetector: [0, 0]
+  accuracy: 0.5
+  # Synthetic Ax projections match the renderer convention with coord_left
+  # false (same as the syn aorta configs); the real dataset keeps true.
+  coord_left: false
+  filter: null
+  noise: false
+  possion_noise: 100000
+  gaussian_noise: [0, 10]
+
+# Volume z faces are [-16.7429, 1.2640] (same extent as the real spiral
+# acquisition, which spans sources from face to face).  The synthetic twin
+# mirrors this: z covers the full volume and z-truncation of the extreme
+# edge views is accepted, exactly as in the real scan.
+spiral:
+  z_start: -16.7429
+  z_end: 1.264
+  pitch: 0.984375
+  sample_per_rotation: 984
+  angle_start: 0
+
+init:
+  n_points: 50000
+  density_threshold: auto
+  density_rescale: 0.15

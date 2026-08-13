@@ -13,13 +13,17 @@ import copy
 import json
 import math
 import struct
+import sys
 from pathlib import Path
 from typing import Any
 
+import cv2
 import numpy as np
 import pydicom
 import yaml
 from scipy import ndimage
+
+sys.path.append(str(Path(__file__).resolve().parents[1]))
 
 
 PRIVATE_TAGS = {
@@ -131,8 +135,37 @@ def load_gt_dicom(
     }
 
 
-def load_real_projections(root: Path, object_scale: float, proj_rescale: float):
-    """Python equivalent of dicom_spiral_process.m (no MAT intermediary)."""
+def load_gt_source(
+    source: Path, target_shape: tuple[int, int, int], xy_invert: bool = False
+) -> tuple[np.ndarray, dict]:
+    if source.suffix.lower() != ".npy":
+        return load_gt_dicom(source, target_shape, xy_invert)
+    volume = np.load(source).astype(np.float32)
+    if volume.shape != target_shape:
+        zoom = np.asarray(target_shape, dtype=float) / np.asarray(volume.shape)
+        volume = ndimage.zoom(volume, zoom, order=3, mode="nearest").astype(np.float32)
+    if not np.isfinite(volume).all():
+        raise ValueError(f"Ground-truth volume contains NaN or Inf: {source}")
+    if xy_invert:
+        volume = volume[::-1, ::-1, :].copy()
+    return volume, {
+        "source_type": "npy",
+        "source_shape": list(np.load(source, mmap_mode="r").shape),
+        "normalized_range": [float(volume.min()), float(volume.max())],
+    }
+
+
+def load_real_projections(root: Path, object_scale: float, proj_rescale: float, proj_subsample: int = 1):
+    """Python equivalent of dicom_spiral_process.m (no MAT intermediary).
+
+    Parameters
+    ----------
+    proj_subsample : int
+        Pixel downsampling factor (default 1 = no downsampling).
+        When > 1, each projection is resized by 1/proj_subsample via cv2.resize
+        and detector spacing is scaled up by the same factor to keep the
+        physical detector size invariant (matching generate_data_usr.py).
+    """
     records = []
     for path in _dicom_files(root):
         ds = pydicom.dcmread(path)
@@ -145,6 +178,11 @@ def load_real_projections(root: Path, object_scale: float, proj_rescale: float):
         # dicom_spiral_process.m transposes detector data before export.
         image = image.T.astype(np.float32) / float(proj_rescale) * float(object_scale)
         image[image < 0] = 0
+        # Projection pixel downsampling (reference: generate_data_usr.py).
+        if proj_subsample != 1:
+            h_ori, w_ori = image.shape
+            h_new, w_new = int(h_ori / proj_subsample), int(w_ori / proj_subsample)
+            image = cv2.resize(image, (w_new, h_new))
         records.append((instance, angle, z_mm, image, ds, path.name))
     records.sort(key=lambda x: x[0])
     first = records[0][4]
@@ -158,6 +196,9 @@ def load_real_projections(root: Path, object_scale: float, proj_rescale: float):
         float(_value(first, "DetectorElementAxialSpacing", PRIVATE_TAGS["spacing_v"])),
         float(_value(first, "DetectorElementTransverseSpacing", PRIVATE_TAGS["spacing_u"])),
     ]
+    # Scale detector spacing to preserve physical detector size after
+    # downsampling (matching generate_data_usr.py: spacing *= proj_subsample).
+    spacing_mm = [s * proj_subsample for s in spacing_mm]
     scanner = {
         "mode": "cone",
         "DSO": float(_value(first, "DetectorFocalCenterRadialDistance", PRIVATE_TAGS["dso"])) / 1000 * object_scale,
@@ -181,7 +222,7 @@ def _geometry(scanner: dict, z_shifts=None):
     geo.nVoxel = np.asarray(scanner["nVoxel"])[::-1]
     geo.sVoxel = np.asarray(scanner["sVoxel"])[::-1]
     geo.dVoxel = geo.sVoxel / geo.nVoxel
-    base = np.asarray(scanner["offOrigin"])[::-1]
+    base = np.asarray(scanner["offOrigin"], dtype=np.float64)[::-1]
     if z_shifts is None:
         geo.offOrigin = base
     else:
@@ -200,21 +241,31 @@ def synthesize_projections(volume, scanner, cfg):
 
     spiral = cfg["spiral"]
     spr = int(spiral["sample_per_rotation"])
-    dsd, dso = float(scanner["DSD"]), float(scanner["DSO"])
-    collimation = 2 * dso * math.tan(float(scanner["sDetector"][0]) / (2 * dsd))
-    dz = float(spiral["pitch"]) * collimation / spr
-    z0, z1 = float(spiral["z_start"]), float(spiral["z_end"])
-    if dz == 0 or (z1 - z0) * dz < 0:
-        raise ValueError("spiral pitch direction does not reach z_end from z_start")
-    count = int(math.floor((z1 - z0) / dz + 1e-9)) + 1
-    z = z0 + np.arange(count, dtype=np.float32) * dz
-    angles = np.deg2rad(float(spiral.get("angle_start", 0))) + np.arange(count) * 2 * np.pi / spr
+    if cfg.get("trajectory", "spiral") == "circular":
+        count = int(cfg["n_train"]) + int(cfg["n_test"])
+        angles = np.deg2rad(float(spiral.get("angle_start", 0))) + np.arange(count) * 2 * np.pi / count
+        z = np.zeros(count, dtype=np.float32)
+        trajectory = {"z_step": 0.0, "rotations": 1.0}
+    else:
+        dsd, dso = float(scanner["DSD"]), float(scanner["DSO"])
+        collimation = 2 * dso * math.tan(float(scanner["sDetector"][0]) / (2 * dsd))
+        dz = float(spiral["pitch"]) * collimation / spr
+        z0, z1 = float(spiral["z_start"]), float(spiral["z_end"])
+        if dz == 0 or (z1 - z0) * dz < 0:
+            raise ValueError("spiral pitch direction does not reach z_end from z_start")
+        count = int(math.floor((z1 - z0) / dz + 1e-9)) + 1
+        z = np.clip(z0 + np.arange(count, dtype=np.float64) * dz,
+                    min(z0, z1), max(z0, z1))
+        angles = np.deg2rad(float(spiral.get("angle_start", 0))) + np.arange(count) * 2 * np.pi / spr
+        trajectory = {
+            "collimation_width": collimation, "z_step": dz,
+        }
     geo = _geometry(scanner, z)
     projs = tigre.Ax(np.transpose(volume, (2, 1, 0)).copy(), geo, np.mod(angles, 2 * np.pi))[:, ::-1, :]
     if scanner.get("noise", False):
         projs = CTnoise.add(projs, Poisson=float(scanner["possion_noise"]), Gaussian=np.asarray(scanner["gaussian_noise"]))
         projs[projs < 0] = 0
-    return projs.astype(np.float32), angles, z, {"collimation_width": collimation, "z_step": dz}
+    return projs.astype(np.float32), angles, z, trajectory
 
 
 def stitch_projections(projs, angles, z, samples_per_rotation, detector_row_size):
@@ -257,48 +308,31 @@ def _split_indices(n, n_train, n_test, seed):
 
 
 def fdk_point_cloud(projs, angles, z, scanner, output, n_points, threshold, density_rescale, seed):
-    import tigre.algorithms as algs
+    from fact_gs.r2_gaussian.utils.ct_utils import (
+        normalize_fdk_volume, recon_volume, sample_intensity_volume,
+    )
 
-    geo = _geometry(scanner, z)
-    volume = algs.fdk(projs[:, ::-1, :], geo, np.mod(angles, 2 * np.pi))
-    volume = np.transpose(volume, (2, 1, 0)).astype(np.float32)
-    auto_threshold = threshold is None or str(threshold).lower() == "auto"
-    if auto_threshold:
-        flat = volume.reshape(-1)
-        finite_indices = np.flatnonzero(np.isfinite(flat))
-        if len(finite_indices) < n_points:
-            raise ValueError(
-                f"FDK has only {len(finite_indices)} finite voxels, fewer than "
-                f"requested n_points={n_points}."
-            )
-        candidate_count = min(len(finite_indices), max(n_points, 3 * n_points))
-        finite_values = flat[finite_indices]
-        start = len(finite_values) - candidate_count
-        candidate_local = np.argpartition(finite_values, start)[start:]
-        candidate_flat = finite_indices[candidate_local]
-        valid = np.column_stack(np.unravel_index(candidate_flat, volume.shape))
-        effective_threshold = float(finite_values[candidate_local].min())
-        print(
-            f"Auto FDK init threshold: {effective_threshold:.8g}; "
-            f"candidate voxels: {len(valid)}; sampled points: {n_points}"
-        )
-    else:
-        threshold = float(threshold)
-        valid = np.argwhere(np.isfinite(volume) & (volume > threshold))
-        if not len(valid):
-            raise ValueError(f"FDK has no voxels above init threshold {threshold}")
-        if len(valid) < n_points:
-            raise ValueError(
-                f"FDK has only {len(valid)} unique voxels above init threshold "
-                f"{threshold}, fewer than requested n_points={n_points}. "
-                "Use init.density_threshold: auto, lower the threshold, or reduce "
-                "init.n_points."
-            )
-    rng = np.random.default_rng(seed)
-    selected = valid[rng.choice(len(valid), n_points, replace=False)]
-    dvoxel = np.asarray(scanner["sVoxel"]) / np.asarray(scanner["nVoxel"])
-    xyz = selected * dvoxel - np.asarray(scanner["sVoxel"]) / 2 + np.asarray(scanner["offOrigin"])
-    density = volume[tuple(selected.T)] * density_rescale
+    scene_scale = 2 / max(scanner["sVoxel"])
+    scaled_scanner = copy.deepcopy(scanner)
+    for key in ("dVoxel", "sVoxel", "sDetector", "dDetector", "offOrigin",
+                "offDetector", "DSD", "DSO"):
+        scaled_scanner[key] = (np.asarray(scaled_scanner[key]) * scene_scale).tolist()
+    scaled_projs = projs * scene_scale
+    scaled_angles = angles
+    if scaled_scanner.get("coord_left", False):
+        scaled_projs = scaled_projs[:, :, ::-1].copy()
+        scaled_projs *= float(scaled_scanner.get("coord_left_projection_scale", 7.0))
+        scaled_angles = -angles
+
+    volume = recon_volume(
+        scaled_projs, scaled_angles, _geometry(scaled_scanner),
+        recon_method="fdk", z_shifts=z * scene_scale,
+    )
+    xyz, density = sample_intensity_volume(
+        normalize_fdk_volume(volume),
+        0.05 if threshold is None or str(threshold).lower() == "auto" else float(threshold),
+        n_points, scaled_scanner, density_rescale, seed=seed,
+    )
     np.save(output, np.concatenate([xyz, density[:, None]], axis=1).astype(np.float32))
 
 
@@ -328,11 +362,11 @@ def write_dataset(root, kind, projs, angles, z, scanner, volume, cfg, provenance
     with (root / "meta_data.json").open("w", encoding="utf-8") as handle:
         json.dump(metadata, handle, indent=2, ensure_ascii=False)
     init_path = root / init_name
-    fdk_point_cloud(projs, angles, z, scanner, init_path, int(cfg["init"]["n_points"]), cfg["init"].get("density_threshold", "auto"), float(cfg["init"]["density_rescale"]), int(cfg["seed"]))
+    fdk_point_cloud(projs[train], angles[train], z[train], scanner, init_path, int(cfg["init"]["n_points"]), cfg["init"].get("density_threshold", "auto"), float(cfg["init"]["density_rescale"]), int(cfg["seed"]))
 
 
 def validate_config(cfg):
-    required = ["dataset_type", "organ", "model", "raw_gt", "output_root", "n_train", "n_test", "scanner"]
+    required = ["dataset_type", "organ", "model", "raw_gt", "output_root", "n_train", "scanner"]
     missing = [key for key in required if key not in cfg]
     if missing:
         raise ValueError(f"missing config keys: {', '.join(missing)}")
@@ -340,6 +374,9 @@ def validate_config(cfg):
         raise ValueError("dataset_type must be real or syn")
     if cfg["dataset_type"] == "real" and not cfg.get("raw_proj"):
         raise ValueError("real dataset requires raw_proj")
+    if cfg.get("trajectory", "spiral") not in {"spiral", "circular"}:
+        raise ValueError("trajectory must be spiral or circular")
+    cfg.setdefault("n_test", math.ceil(1.5 * int(cfg["n_train"])))
     stitch = cfg.get("stitch", {})
     if stitch.get("enabled", False) and "n_train" not in stitch:
         raise ValueError("stitch.enabled=true requires stitch.n_train")
@@ -347,7 +384,7 @@ def validate_config(cfg):
 
 def dataset_output_path(output_root: Path, cfg: dict, kind: str, n_train=None) -> Path:
     """Return the hierarchical dataset directory used by the training workflow."""
-    if kind not in {"spiral", "stitch"}:
+    if kind not in {"spiral", "circular", "stitch"}:
         raise ValueError(f"unsupported projection type: {kind}")
     count = int(cfg["n_train"] if n_train is None else n_train)
     return (
@@ -390,7 +427,7 @@ def run(config_path: Path, validate_only=False):
     if validate_only:
         return
     target = tuple(int(x) for x in cfg["scanner"]["nVoxel"])
-    volume, gt_info = load_gt_dicom(
+    volume, gt_info = load_gt_source(
         Path(cfg["raw_gt"]), target, bool(cfg.get("gt_xy_invert", False))
     )
     scanner = copy.deepcopy(cfg["scanner"])
@@ -398,7 +435,10 @@ def run(config_path: Path, validate_only=False):
         projs, angles, z, trajectory = synthesize_projections(volume, scanner, cfg)
         flip = False
     else:
-        projs, angles, z, dicom_scanner, flip = load_real_projections(Path(cfg["raw_proj"]), float(cfg["object_scale"]), float(cfg["proj_rescale"]))
+        proj_subsample = int(cfg.get("proj_subsample", 1))
+        projs, angles, z, dicom_scanner, flip = load_real_projections(
+            Path(cfg["raw_proj"]), float(cfg["object_scale"]), float(cfg["proj_rescale"]), proj_subsample
+        )
         scanner.update(dicom_scanner)
         trajectory = {}
     scanner.setdefault("coord_left", False)
@@ -412,8 +452,9 @@ def run(config_path: Path, validate_only=False):
         else {"enabled": False}
     )
     out = Path(cfg["output_root"])
-    provenance = {"config": str(config_path), "gt": gt_info, "trajectory": trajectory, "real_z_convention_flipped": flip, "real_volume_bounds": real_bounds}
-    write_dataset(dataset_output_path(out, cfg, "spiral"), "spiral", projs, angles, z, scanner, volume, cfg, provenance)
+    provenance = {"config": str(config_path), "gt": gt_info, "trajectory": trajectory, "real_z_convention_flipped": flip, "real_volume_bounds": real_bounds, "proj_subsample": int(cfg.get("proj_subsample", 1))}
+    kind = str(cfg.get("trajectory", "spiral"))
+    write_dataset(dataset_output_path(out, cfg, kind), kind, projs, angles, z, scanner, volume, cfg, provenance)
     stitch_cfg_raw = cfg.get("stitch", {})
     if stitch_cfg_raw.get("enabled", False):
         spr = int(cfg.get("spiral", {}).get("sample_per_rotation", scanner.get("samples_per_rotation", 0)))
@@ -427,7 +468,11 @@ def run(config_path: Path, validate_only=False):
         stitched_z = np.zeros(len(stitched), dtype=np.float32)
         stitch_cfg = copy.deepcopy(cfg)
         stitch_cfg["n_train"] = int(stitch_cfg_raw["n_train"])
-        stitch_cfg["n_test"] = int(stitch_cfg_raw.get("n_test", cfg["n_test"]))
+        stitch_cfg["n_test"] = int(
+            stitch_cfg_raw.get(
+                "n_test", math.ceil(1.5 * int(stitch_cfg["n_train"]))
+            )
+        )
         write_dataset(dataset_output_path(out, stitch_cfg, "stitch"), "stitch", stitched, stitched_angles, stitched_z, stitch_scanner, volume, stitch_cfg, {**provenance, "stitch": stitch_info})
 
 

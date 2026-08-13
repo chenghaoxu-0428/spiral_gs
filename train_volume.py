@@ -262,9 +262,14 @@ def save_final_metrics(model_path, metrics, training_time_seconds):
         return
     eval_save_path = osp.dirname(model_path)
     yaml_name = f"{osp.basename(model_path)}_metrics_final.yml"
+    # Prefer explicit keys; fall back to the test-split projection metrics when present.
+    psnr_2d = metrics.get("psnr_2d", metrics.get("render_test_psnr_2d"))
+    ssim_2d = metrics.get("ssim_2d", metrics.get("render_test_ssim_2d"))
     payload = {
         "psnr_3d": metrics.get("psnr_3d"),
         "ssim_3d": metrics.get("ssim_3d"),
+        "psnr_2d": psnr_2d,
+        "ssim_2d": ssim_2d,
         "time_training_seconds": training_time_seconds,
     }
     with open(osp.join(eval_save_path, yaml_name), "w") as f:
