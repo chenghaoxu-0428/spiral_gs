@@ -67,6 +67,10 @@ def optimize(config, profiler=None, tb_writer=None):
     """
     model_args, optim_args, eval_args = config.model, config.optim, config.eval
     scene = SceneRecon(model_args, shuffle=False)
+    # Record the camera geometry corrections used for this run so evaluation
+    # can reproduce them later.
+    with open(osp.join(model_args.model_path, "geometry_used.yml"), "w") as handle:
+        yaml.safe_dump(dict(model_args.geometry), handle)
     training_time_seconds = 0.0
     eval_and_save_time_seconds = 0.0
 

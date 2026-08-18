@@ -13,6 +13,15 @@ def test_circular_dataset_path():
     )
 
 
+def test_cylindrical_detector_is_rebinned_to_tangent_plane():
+    source = np.tile(np.arange(5, dtype=np.float32), (3, 1))[None]
+    flat, size = norm_pipeline.flatten_cylindrical_detector(source, 10.0, [1.0, 2.0])
+
+    assert flat.shape == source.shape
+    np.testing.assert_allclose(flat[0, 1], [0, 0.938, 2, 3.062, 4], atol=0.01)
+    np.testing.assert_allclose(size, [3.0, 20 * np.tan(0.5)], rtol=1e-6)
+
+
 def test_fdk_initialization_uses_training_views(tmp_path, monkeypatch):
     captured = {}
 
@@ -43,6 +52,30 @@ def test_fdk_initialization_uses_training_views(tmp_path, monkeypatch):
     np.testing.assert_array_equal(captured["z"], z[expected])
 
 
+def test_preprocessed_coord_left_init_reflects_x(tmp_path, monkeypatch):
+    from fact_gs.r2_gaussian.utils import ct_utils
+
+    monkeypatch.setattr(ct_utils, "recon_volume", lambda *_args, **_kwargs: np.ones((1, 1, 1)))
+    monkeypatch.setattr(
+        ct_utils, "sample_intensity_volume",
+        lambda *_args, **_kwargs: (np.array([[0.25, 0.0, 0.0]]), np.ones(1)),
+    )
+    scanner = {
+        "nDetector": [1, 1], "sDetector": [1, 1], "dDetector": [1, 1],
+        "nVoxel": [1, 1, 1], "sVoxel": [2, 2, 2], "dVoxel": [2, 2, 2],
+        "offOrigin": [0, 0, 0], "offDetector": [0, 0], "DSD": 2, "DSO": 1,
+        "mode": "cone", "coord_left": True,
+    }
+
+    output = tmp_path / "init.npy"
+    norm_pipeline.fdk_point_cloud(
+        np.ones((1, 1, 1)), np.zeros(1), np.zeros(1), scanner,
+        output, 1, "auto", 1, 0,
+    )
+
+    np.testing.assert_allclose(np.load(output)[0, :3], [-0.25, 0, 0])
+
+
 def test_intensity_initialization_normalizes_density_and_scene_coordinates():
     from fact_gs.r2_gaussian.utils.ct_utils import (
         normalize_fdk_volume,
@@ -59,4 +92,3 @@ def test_intensity_initialization_normalizes_density_and_scene_coordinates():
 
     assert np.all(xyz >= -0.75) and np.all(xyz <= 0.75)
     assert np.all(density > 0.05 * 0.15) and np.all(density <= 0.15)
-

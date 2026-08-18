@@ -35,12 +35,18 @@ class SceneRecon:
         self.train_cameras = {}
         self.test_cameras = {}
 
+        # Optional per-view geometry corrections (principal point, per-view
+        # source dynamics). Plain dicts / DictConfigs / namespaces are all
+        # accepted; missing config means no correction is applied.
+        geometry_cfg = getattr(model_args, "geometry", None)
+
         # Read scene info
         if osp.exists(osp.join(model_args.data_source_path, "meta_data.json")):
             # Blender format
             scene_info = sceneLoadTypeCallbacks["Blender"](
                 model_args.data_source_path,
                 model_args.eval,
+                geometry_cfg,
             )
         elif model_args.data_source_path.split(".")[-1] in ["pickle", "pkl"]:
             # NAF format

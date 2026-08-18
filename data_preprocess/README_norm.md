@@ -26,6 +26,8 @@ real 数据的 DSD、DSO、探测器尺寸、pitch 和每圈采样数来自投�
 保留体素分辨率等重建设置。默认按照全部投影的 z 最小值/最大值自动更新
 `scanner.sVoxel` 和 `scanner.offOrigin`，行为由 `real.*` 配置控制。
 
+关键参数"coord_left",real数据集配置为true,syn数据集一律配置为false.
+
 省略 `n_test` 时，管线默认使用 `ceil(1.5 * n_train)` 个测试视角；显式配置
 `n_test` 时以配置值为准。stitch 的 `n_test` 同样相对于 stitch 自己的
 `n_train` 计算。

@@ -1,0 +1,52 @@
+dataset_type: real
+organ: ldctl004
+model: r2gs
+raw_gt: /opt/data/private/data/ldctl004/LDCT-and-Projection-data/L004/12-23-2021-NA-NA-40641/1.000000-Full Dose Images-63186
+raw_proj: /opt/data/private/data/ldctl004/LDCT-and-Projection-data/L004/08-21-2018-NA-NA-10971/1.000000-Full dose projections-24362
+gt_xy_invert: false
+output_root: data
+n_train: 500
+seed: 0
+
+stitch:
+  enabled: false
+  n_train: 100
+  n_test: 100
+
+object_scale: 50
+proj_rescale: 400
+proj_subsample: 4
+
+scanner:
+  mode: cone
+  DSD: 47.2
+  DSO: 26.9260009765625
+  nDetector: [64, 888]
+  sDetector: [3.2764801, 45.4611614]
+  nVoxel: [256, 256, 256]
+  sVoxel: [16.0, 16.0, 24.0]
+  offOrigin: [0, 0, 0]
+  offDetector: [0, 0]
+  accuracy: 0.5
+  coord_left: true
+  filter: null
+  noise: false
+  possion_noise: 100000
+  gaussian_noise: [0, 10]
+
+spiral:
+  z_start: -12
+  z_end: 12
+  pitch: 0.9844
+  sample_per_rotation: 984
+  angle_start: 0
+
+init:
+  n_points: 50000
+  density_threshold: auto
+  density_rescale: 0.15
+
+real:
+  auto_svoxel_from_zshift: true
+  equal_xyz_span: true
+  min_svoxel_span: 1.0e-6

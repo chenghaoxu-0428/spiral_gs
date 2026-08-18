@@ -1,0 +1,42 @@
+dataset_type: syn
+organ: ldctl004
+model: r2gs
+raw_gt: /opt/data/private/data/ldctl004/LDCT-and-Projection-data/L004/12-23-2021-NA-NA-40641/1.000000-Full Dose Images-63186
+gt_xy_invert: false
+output_root: data
+n_train: 2000
+n_test: 3000
+seed: 0
+
+stitch:
+  enabled: false
+
+object_scale: 50
+proj_rescale: 400
+
+scanner:
+  mode: cone
+  DSD: 54.279998779296875
+  DSO: 29.75
+  nDetector: [16, 184]
+  sDetector: [3.5031127929687504, 47.31888694763184]
+  nVoxel: [256, 256, 256]
+  sVoxel: [16.34749922156334, 16.34749922156334, 16.34749922156334]
+  offOrigin: [0, 0, -8.501249626278877]
+  offDetector: [0, 0]
+  accuracy: 0.5
+  coord_left: false
+  filter: null
+  noise: false
+
+spiral:
+  z_start: -16.674999237060547
+  z_end: -0.32750001549720764
+  pitch: 0.6
+  sample_per_rotation: 2304
+  angle_start: 0
+
+init:
+  n_points: 50000
+  density_threshold: auto
+  density_rescale: 0.15

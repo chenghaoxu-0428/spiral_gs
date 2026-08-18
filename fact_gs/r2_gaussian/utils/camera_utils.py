@@ -19,7 +19,7 @@ from fact_gs.r2_gaussian.dataset.cameras import Camera
 def loadCam(args, id, cam_info):
     gt_image = torch.from_numpy(cam_info.image)[None]
 
-    return Camera(
+    camera = Camera(
         colmap_id=cam_info.uid,
         scanner_cfg=cam_info.scanner_cfg,
         R=cam_info.R,
@@ -34,6 +34,17 @@ def loadCam(args, id, cam_info):
         data_device='cuda' if torch.cuda.is_available() else 'cpu',
         z_shift=cam_info.z_shift,
     )
+    u_offset_px = float(getattr(cam_info, "u_offset_px", 0.0))
+    if u_offset_px:
+        # Horizontal principal-point shift in detector pixels (matches
+        # experiments/helpers/scan_projection_geometry.py convention).
+        camera.projection_matrix[2, 0] = 2.0 * u_offset_px / camera.image_width
+        camera.full_proj_transform = (
+            camera.world_view_transform.unsqueeze(0)
+            .bmm(camera.projection_matrix.unsqueeze(0))
+            .squeeze(0)
+        )
+    return camera
 
 
 def cameraList_from_camInfos(cam_infos, args):

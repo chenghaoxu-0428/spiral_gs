@@ -31,6 +31,7 @@ class CameraInfo(NamedTuple):
     mode: int
     scanner_cfg: dict
     z_shift: float = 0.0  # per-projection source z (scene units, same scale as scanner_cfg)
+    u_offset_px: float = 0.0  # horizontal principal-point offset in detector pixels
 
 
 class SceneInfo(NamedTuple):
@@ -41,7 +42,7 @@ class SceneInfo(NamedTuple):
     scene_scale: float
 
 
-def readBlenderInfo(path, eval):
+def readBlenderInfo(path, eval, geometry_cfg=None):
     """Read blender format CT data."""
     # Read meta data
     meta_data_path = osp.join(path, "meta_data.json")
@@ -76,7 +77,7 @@ def readBlenderInfo(path, eval):
             np.array(meta_data["scanner"][key_to_scale]) * scene_scale
         ).tolist()
 
-    cam_infos = readCTameras(meta_data, path, eval, scene_scale)
+    cam_infos = readCTameras(meta_data, path, eval, scene_scale, geometry_cfg)
     train_cam_infos = cam_infos["train"]
     test_cam_infos = cam_infos["test"]
 
@@ -101,9 +102,41 @@ def readBlenderInfo(path, eval):
     return scene_info
 
 
-def readCTameras(meta_data, source_path, eval=False, scene_scale=1.0):
-    """Read camera info."""
+def _load_source_shifts(source_path):
+    """Load the optional per-view source-dynamics sidecar."""
+    sidecar_path = osp.join(source_path, "source_shifts.json")
+    if not osp.exists(sidecar_path):
+        return None
+    with open(sidecar_path, "r") as handle:
+        sidecar = json.load(handle)
+    return sidecar.get("shifts")
+
+
+def readCTameras(meta_data, source_path, eval=False, scene_scale=1.0, geometry_cfg=None):
+    """Read camera info.
+
+    ``geometry_cfg`` optionally applies per-view geometry corrections:
+      - ``u_offset_px``: horizontal principal-point offset in detector pixels;
+      - ``source_shift_mode``: "off" | "angle_z" | "angle_z_radial". Reads the
+        per-view CT-PD source dynamics shifts from ``source_shifts.json`` and
+        perturbs the camera pose accordingly (CT-PD semantics: true source
+        pose = nominal DetectorFocalCenter pose + Source*Shift);
+      - ``radial_mode``: "dso" (shift added to source radius) or "dsd"
+        (shift added to source-detector distance, with FoV rescaling);
+      - ``angular_sign`` / ``axial_sign`` / ``radial_sign``: sign multipliers.
+    """
+    geometry_cfg = geometry_cfg or {}
     cam_cfg = meta_data["scanner"]
+    shift_mode = geometry_cfg.get("source_shift_mode", "off") or "off"
+    if shift_mode not in ("off", "angle_z", "angle_z_radial"):
+        raise ValueError(f"unknown source_shift_mode {shift_mode!r}")
+    radial_mode = geometry_cfg.get("radial_mode", "dso")
+    u_offset_px = float(geometry_cfg.get("u_offset_px", 0.0))
+    source_shifts = _load_source_shifts(source_path) if shift_mode != "off" else None
+    if shift_mode != "off" and source_shifts is None:
+        raise FileNotFoundError(
+            f"source_shift_mode={shift_mode} but {source_path}/source_shifts.json missing"
+        )
 
     if eval:
         splits = ["train", "test"]
@@ -128,8 +161,33 @@ def readCTameras(meta_data, source_path, eval=False, scene_scale=1.0):
             frame_z_shift = float(frame_info.get("z_shift", 0.0)) * scene_scale
             coord_left = bool(cam_cfg.get("coord_left", False))
 
+            # Per-view source dynamics correction (CT-PD SourceDynamicsModule):
+            # the true focal spot is at nominal pose + Source*Shift.
+            dso = float(cam_cfg["DSO"])
+            dsd = float(cam_cfg["DSD"])
+            if shift_mode in ("angle_z", "angle_z_radial") and source_shifts:
+                shift = source_shifts[split][i_split]
+                frame_angle += float(geometry_cfg.get("angular_sign", 1.0)) * float(shift["angular"])
+                frame_z_shift += (
+                    float(geometry_cfg.get("axial_sign", 1.0))
+                    * float(shift["axial"])
+                    * scene_scale
+                )
+                if shift_mode == "angle_z_radial":
+                    dr = (
+                        float(geometry_cfg.get("radial_sign", 1.0))
+                        * float(shift["radial"])
+                        * scene_scale
+                    )
+                    if radial_mode == "dso":
+                        dso += dr
+                    elif radial_mode == "dsd":
+                        dsd += dr
+                    else:
+                        raise ValueError(f"unknown radial_mode {radial_mode}")
+
             # CT 'transform_matrix' is a camera-to-world transform
-            c2w = angle2pose(cam_cfg["DSO"], frame_angle, frame_z_shift)  # c2w
+            c2w = angle2pose(dso, frame_angle, frame_z_shift)  # c2w
             # get the world-to-camera transform and set R, T
             w2c = np.linalg.inv(c2w)
             R = np.transpose(
@@ -147,8 +205,8 @@ def readCTameras(meta_data, source_path, eval=False, scene_scale=1.0):
                 # handedness-adjusted angle for downstream metadata consumers.
                 frame_angle = -frame_angle
             # Note, dDetector is [v, u] not [u, v]
-            FovX = np.arctan2(cam_cfg["sDetector"][1] / 2, cam_cfg["DSD"]) * 2
-            FovY = np.arctan2(cam_cfg["sDetector"][0] / 2, cam_cfg["DSD"]) * 2
+            FovX = np.arctan2(cam_cfg["sDetector"][1] / 2, dsd) * 2
+            FovY = np.arctan2(cam_cfg["sDetector"][0] / 2, dsd) * 2
 
             mode = mode_id[cam_cfg["mode"]]
 
@@ -167,6 +225,7 @@ def readCTameras(meta_data, source_path, eval=False, scene_scale=1.0):
                 mode=mode,
                 scanner_cfg=cam_cfg,
                 z_shift=frame_z_shift,
+                u_offset_px=u_offset_px,
             )
             cam_infos[split].append(cam_info)
         sys.stdout.write("\n")
