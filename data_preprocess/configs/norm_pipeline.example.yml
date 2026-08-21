@@ -28,7 +28,7 @@ scanner:
   nVoxel: [256, 256, 256]
   sVoxel: [16.0, 16.0, 24.0]
   offOrigin: [0, 0, 0]
-  offDetector: [0, 0]
+  offDetector: [0, 0]              # real: overwritten from DICOM DetectorCentralElement; syn: keep [0, 0]
   accuracy: 0.5
   coord_left: true
   filter: null

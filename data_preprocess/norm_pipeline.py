@@ -42,6 +42,7 @@ PRIVATE_TAGS = {
     "source_axial_shift": (0x7033, 0x100C),
     "source_radial_shift": (0x7033, 0x100D),
     "flying_focal_spot_mode": (0x7033, 0x100E),
+    "central_element": (0x7031, 0x1033),
 }
 
 PRIVATE_VRS = {
@@ -57,6 +58,7 @@ PRIVATE_VRS = {
     PRIVATE_TAGS["source_angular_shift"]: "FL",
     PRIVATE_TAGS["source_axial_shift"]: "FL",
     PRIVATE_TAGS["source_radial_shift"]: "FL",
+    PRIVATE_TAGS["central_element"]: "FL",
 }
 
 
@@ -75,6 +77,47 @@ def _value(ds: pydicom.Dataset, keyword: str, tag=None, default=None):
         decoded = struct.unpack(byte_order + fmt * (len(value) // item_size), value)
         value = decoded[0] if len(decoded) == 1 else decoded
     return default if value is None else value
+
+
+def detector_off_from_central_element(
+    central_element,
+    n_detector_native,
+    proj_subsample: int,
+    d_detector,
+    sign: float = -1.0,
+):
+    """Map CT-PD DetectorCentralElement onto scanner offDetector [u, v].
+
+    ``DetectorCentralElement`` is ``(Column X, Row Y)`` in native element
+    index. The geometric centre is ``(N+1)/2``. The offset is converted to the
+    downsampled training grid and then to the same length unit as ``dDetector``.
+    ``sign=-1`` matches the rasterizer principal-point convention used by
+    real ``coord_left`` datasets (analytic u=−0.28125 px for ldctl004).
+    """
+    if central_element is None:
+        return [0.0, 0.0], {}
+    values = np.asarray(central_element, dtype=np.float64).reshape(-1)
+    if values.size < 2:
+        raise ValueError(f"DetectorCentralElement must have 2 values, got {central_element}")
+    col_x, row_y = float(values[0]), float(values[1])
+    n_rows, n_cols = float(n_detector_native[0]), float(n_detector_native[1])
+    subsample = float(proj_subsample) if proj_subsample else 1.0
+    u_px = sign * (col_x - (n_cols + 1.0) / 2.0) / subsample
+    v_px = sign * (row_y - (n_rows + 1.0) / 2.0) / subsample
+    if u_px == 0.0:
+        u_px = 0.0
+    if v_px == 0.0:
+        v_px = 0.0
+    d_v, d_u = float(d_detector[0]), float(d_detector[1])
+    off_detector = [u_px * d_u, v_px * d_v]
+    return off_detector, {
+        "detector_central_element": [col_x, row_y],
+        "n_detector_native": [int(n_rows), int(n_cols)],
+        "proj_subsample": int(subsample),
+        "u_offset_px": u_px,
+        "v_offset_px": v_px,
+        "offDetector": off_detector,
+    }
 
 
 def _dicom_files(root: Path) -> list[Path]:
@@ -262,6 +305,24 @@ def load_real_projections(root: Path, object_scale: float, proj_rescale: float, 
         "samples_per_rotation": int(_value(first, "NumberofSourceAngularSteps", PRIVATE_TAGS["samples_per_rotation"])),
         "pitch": float(_value(first, "SpiralPitchFactor", default=1.0)),
     }
+    n_det = list(projs.shape[1:])
+    d_det = (np.asarray(scanner["sDetector"], dtype=np.float64) / np.asarray(n_det)).tolist()
+    n_rows_native = int(_value(
+        first, "NumberofDetectorRows", PRIVATE_TAGS["detector_rows"],
+        default=n_det[0] * max(proj_subsample, 1),
+    ))
+    n_cols_native = int(_value(
+        first, "NumberofDetectorColumns", PRIVATE_TAGS["detector_cols"],
+        default=n_det[1] * max(proj_subsample, 1),
+    ))
+    central = _value(first, "DetectorCentralElement", PRIVATE_TAGS["central_element"])
+    off_detector, principal = detector_off_from_central_element(
+        central, [n_rows_native, n_cols_native], proj_subsample, d_det,
+    )
+    scanner["offDetector"] = off_detector
+    scanner["dDetector"] = d_det
+    if principal:
+        scanner["detector_principal"] = principal
     return projs, np.asarray([x[1] for x in records]), z_scene, scanner, flip
 
 
@@ -361,10 +422,14 @@ def _split_indices(n, n_train, n_test, seed):
     return train, test
 
 
-def fdk_point_cloud(projs, angles, z, scanner, output, n_points, threshold, density_rescale, seed):
-    from fact_gs.r2_gaussian.utils.ct_utils import (
-        normalize_fdk_volume, recon_volume, sample_intensity_volume,
-    )
+def reconstruct_fdk_volume(projs, angles, z, scanner):
+    """Reconstruct the FDK volume used by preprocessing initialization.
+
+    Matches ``fdk_point_cloud``: scene-scale geometry, optional ``coord_left``
+    flips, helical ``z_shift`` FDK, then non-negative / p99.5 / [0, 1] clip.
+    The returned array has the same layout as ``vol_gt.npy``.
+    """
+    from fact_gs.r2_gaussian.utils.ct_utils import normalize_fdk_volume, recon_volume
 
     scene_scale = 2 / max(scanner["sVoxel"])
     scaled_scanner = copy.deepcopy(scanner)
@@ -380,10 +445,23 @@ def fdk_point_cloud(projs, angles, z, scanner, output, n_points, threshold, dens
 
     volume = recon_volume(
         scaled_projs, scaled_angles, _geometry(scaled_scanner),
-        recon_method="fdk", z_shifts=z * scene_scale,
+        recon_method="fdk", z_shifts=np.asarray(z) * scene_scale,
     )
+    return normalize_fdk_volume(volume)
+
+
+def fdk_point_cloud(projs, angles, z, scanner, output, n_points, threshold, density_rescale, seed):
+    from fact_gs.r2_gaussian.utils.ct_utils import sample_intensity_volume
+
+    scene_scale = 2 / max(scanner["sVoxel"])
+    scaled_scanner = copy.deepcopy(scanner)
+    for key in ("dVoxel", "sVoxel", "sDetector", "dDetector", "offOrigin",
+                "offDetector", "DSD", "DSO"):
+        scaled_scanner[key] = (np.asarray(scaled_scanner[key]) * scene_scale).tolist()
+
+    volume = reconstruct_fdk_volume(projs, angles, z, scanner)
     xyz, density = sample_intensity_volume(
-        normalize_fdk_volume(volume),
+        volume,
         0.05 if threshold is None or str(threshold).lower() == "auto" else float(threshold),
         n_points, scaled_scanner, density_rescale, seed=seed,
     )
@@ -406,6 +484,10 @@ def write_dataset(root, kind, projs, angles, z, scanner, volume, cfg, provenance
             np.save(root / rel, projs[idx].astype(np.float32))
             payload[f"proj_{split}"].append({"file_path": rel.as_posix(), "angle": float(angles[idx]), "z_shift": float(z[idx])})
     scanner = copy.deepcopy(scanner)
+    provenance = dict(provenance)
+    principal = scanner.pop("detector_principal", None)
+    if principal:
+        provenance.setdefault("detector_principal", principal)
     scanner["dDetector"] = (np.asarray(scanner["sDetector"]) / np.asarray(scanner["nDetector"])).tolist()
     scanner["dVoxel"] = (np.asarray(scanner["sVoxel"]) / np.asarray(scanner["nVoxel"])).tolist()
     init_name = f"init_{root.name}.npy"

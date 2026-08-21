@@ -1,0 +1,4 @@
+interface:
+  display_name: "多方法重建切片对比"
+  short_description: "采集 FDK / SAX-NeRF / FaCT-GS 结果并绘制 ROI 切片对比图"
+  default_prompt: "使用 $compare-recon-methods 搜集各方法结果并画出切片 ROI 对比图。"

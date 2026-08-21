@@ -25,6 +25,11 @@ CT-PD 私有几何字段。spiral 始终生成；stitch 默认关闭，仅在配
 real 数据的 DSD、DSO、探测器尺寸、pitch 和每圈采样数来自投影 DICOM；YAML
 保留体素分辨率等重建设置。默认按照全部投影的 z 最小值/最大值自动更新
 `scanner.sVoxel` 和 `scanner.offOrigin`，行为由 `real.*` 配置控制。
+`scanner.offDetector` 由 DICOM `DetectorCentralElement` 与探测器几何中心
+`(N+1)/2` 的差解析得到（再除以下采样因子并乘 `dDetector`），写入
+`meta_data.json`；训练投影矩阵直接读取该字段，不再需要 Hydra
+`geometry.u_offset_px` 注入。YAML 里的 `offDetector: [0, 0]` 会被 DICOM
+解析结果覆盖。
 
 关键参数"coord_left",real数据集配置为true,syn数据集一律配置为false.
 

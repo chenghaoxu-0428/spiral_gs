@@ -76,6 +76,24 @@ def test_preprocessed_coord_left_init_reflects_x(tmp_path, monkeypatch):
     np.testing.assert_allclose(np.load(output)[0, :3], [-0.25, 0, 0])
 
 
+def test_detector_central_element_maps_to_analytic_u_offset():
+    off, info = norm_pipeline.detector_off_from_central_element(
+        [369.625, 32.5], [64, 736], 4, [0.2189445495605469, 0.2571678638458252],
+    )
+    np.testing.assert_allclose(info["u_offset_px"], -0.28125)
+    np.testing.assert_allclose(info["v_offset_px"], 0.0)
+    np.testing.assert_allclose(off[0], -0.28125 * 0.2571678638458252)
+    np.testing.assert_allclose(off[1], 0.0)
+
+
+def test_missing_detector_central_element_leaves_offdetector_zero():
+    off, info = norm_pipeline.detector_off_from_central_element(
+        None, [64, 736], 4, [1.0, 1.0],
+    )
+    assert off == [0.0, 0.0]
+    assert info == {}
+
+
 def test_intensity_initialization_normalizes_density_and_scene_coordinates():
     from fact_gs.r2_gaussian.utils.ct_utils import (
         normalize_fdk_volume,

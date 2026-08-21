@@ -1,7 +1,7 @@
 {
   "name": "fact-gs-training",
-  "version": "0.2.1",
-  "description": "FaCT-GS dataset, Hydra preflight, reconstruction, volume fitting, monitoring, and reporting workflows for Codex.",
+  "version": "0.3.0",
+  "description": "FaCT-GS dataset, Hydra preflight, reconstruction, volume fitting, monitoring, reporting, and multi-method ROI slice comparison workflows for Codex.",
   "author": {
     "name": "leggage",
     "url": "https://github.com/leggage"
@@ -21,7 +21,7 @@
   "interface": {
     "displayName": "FaCT-GS Training",
     "shortDescription": "Automate FaCT-GS experiments safely.",
-    "longDescription": "Prepare R2-compatible CT datasets, validate Hydra and CUDA environments, run FaCT-GS training in an independent live terminal, monitor logs and metrics, and generate experiment summaries.",
+    "longDescription": "Prepare R2-compatible CT datasets, validate Hydra and CUDA environments, run FaCT-GS training in an independent live terminal, monitor logs and metrics, generate experiment summaries, and collect FDK/SAX-NeRF/FaCT-GS volumes into ROI slice comparison figures.",
     "developerName": "leggage",
     "category": "DeveloperTools",
     "capabilities": [

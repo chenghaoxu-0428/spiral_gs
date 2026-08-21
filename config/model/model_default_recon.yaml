@@ -13,7 +13,7 @@ scale_min: 0.0005 # Percent of volume size
 scale_max: 0.5 # Percent of volume size
 eval: True
 geometry:
-  u_offset_px: 0.0 # horizontal principal-point offset in detector pixels (real cylindrical detector: -0.275)
+  u_offset_px: 0.0 # extra Hydra override in detector pixels; real datasets store the DICOM-derived offset in scanner.offDetector
   source_shift_mode: "off" # off | angle_z | angle_z_radial (requires source_shifts.json sidecar in the dataset)
   radial_mode: dso # dso (shift changes source radius) | dsd (shift changes source-detector distance)
   angular_sign: 1.0 # sign multiplier for SourceAngularPositionShift

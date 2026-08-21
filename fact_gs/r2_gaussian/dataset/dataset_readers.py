@@ -31,7 +31,7 @@ class CameraInfo(NamedTuple):
     mode: int
     scanner_cfg: dict
     z_shift: float = 0.0  # per-projection source z (scene units, same scale as scanner_cfg)
-    u_offset_px: float = 0.0  # horizontal principal-point offset in detector pixels
+    u_offset_px: float = 0.0  # extra Hydra override; dataset offset lives in scanner.offDetector
 
 
 class SceneInfo(NamedTuple):
@@ -116,7 +116,8 @@ def readCTameras(meta_data, source_path, eval=False, scene_scale=1.0, geometry_c
     """Read camera info.
 
     ``geometry_cfg`` optionally applies per-view geometry corrections:
-      - ``u_offset_px``: horizontal principal-point offset in detector pixels;
+      - ``u_offset_px``: extra Hydra override in detector pixels, added on
+        top of ``scanner.offDetector`` from ``meta_data.json``;
       - ``source_shift_mode``: "off" | "angle_z" | "angle_z_radial". Reads the
         per-view CT-PD source dynamics shifts from ``source_shifts.json`` and
         perturbs the camera pose accordingly (CT-PD semantics: true source

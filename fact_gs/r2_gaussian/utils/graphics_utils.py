@@ -134,6 +134,17 @@ def getProjectionMatrix(fovX, fovY, mode, scanner_cfg):
         P[1, 1] = 2.0 * znear / (top - bottom)
         P[0, 2] = (right + left) / (right - left)
         P[1, 2] = (top + bottom) / (top - bottom)
+        # scanner.offDetector is [u, v] in the same units as sDetector.
+        # Equivalent to the former CameraInfo u_offset_px injection:
+        #   projection_matrix[2, 0] = 2 * u_offset_px / width
+        # because Camera transposes this matrix and
+        #   u_offset_px / width = off_u / sDetector_u.
+        off_det = scanner_cfg.get("offDetector") or [0.0, 0.0]
+        s_det = scanner_cfg.get("sDetector") or [0.0, 0.0]
+        if float(s_det[1]) != 0.0:
+            P[0, 2] += 2.0 * float(off_det[0]) / float(s_det[1])
+        if float(s_det[0]) != 0.0:
+            P[1, 2] += 2.0 * float(off_det[1]) / float(s_det[0])
         P[3, 2] = z_sign
         P[2, 2] = z_sign * zfar / (zfar - znear)
         P[2, 3] = -(zfar * znear) / (zfar - znear)

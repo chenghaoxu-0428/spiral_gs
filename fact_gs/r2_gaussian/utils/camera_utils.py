@@ -36,9 +36,9 @@ def loadCam(args, id, cam_info):
     )
     u_offset_px = float(getattr(cam_info, "u_offset_px", 0.0))
     if u_offset_px:
-        # Horizontal principal-point shift in detector pixels (matches
-        # experiments/helpers/scan_projection_geometry.py convention).
-        camera.projection_matrix[2, 0] = 2.0 * u_offset_px / camera.image_width
+        # Optional Hydra override on top of scanner.offDetector (which
+        # getProjectionMatrix already baked in from meta_data.json).
+        camera.projection_matrix[2, 0] += 2.0 * u_offset_px / camera.image_width
         camera.full_proj_transform = (
             camera.world_view_transform.unsqueeze(0)
             .bmm(camera.projection_matrix.unsqueeze(0))

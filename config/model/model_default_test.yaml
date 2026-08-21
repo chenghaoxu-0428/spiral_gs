@@ -5,7 +5,7 @@ eval: True
 
 vol_name: "vol_gt" # name of the target volume in the data source for evaluation (e.g. "vol_gt" or "vol_prior")
 geometry:
-  u_offset_px: 0.0
+  u_offset_px: 0.0 # extra override; real datasets store DICOM offset in scanner.offDetector
   source_shift_mode: "off"
   radial_mode: dso
   angular_sign: 1.0
